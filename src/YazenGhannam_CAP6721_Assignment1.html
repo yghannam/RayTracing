@@ -1,0 +1,80 @@
+<!--
+Author: Yazen Ghannam
+Spring 2013
+CAP 6721
+Assignment 1a
+-->
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+		<meta content="utf-8" http-equiv="encoding">
+		<script id="openclProgram" type="text/x-opencl">
+			__kernel void getPixelColor(
+				const int width,
+				const int height,
+				__global uchar4 *raster){
+					const int col = get_global_id(0);
+					const int row = get_global_id(1);
+					int value = 255*row/height;
+					uchar4 color = (uchar4)(value, value, value, 255);
+					raster[row * width + col] = color;
+				}
+		</script>
+		<script type="text/javascript">
+			function main(){
+				var platforms = null;
+				var devices = [];
+				var canvas = null;
+				var canvasCtx = null;
+				var raster = null;
+				
+				try{
+					canvas = document.getElementById("myCanvas");
+					canvasCtx = canvas.getContext("2d");
+					raster = canvasCtx.createImageData(canvas.width, canvas.height);
+					
+					platforms = WebCL.getPlatformIDs();
+					for ( var i in platforms ){
+						devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_ALL);
+					}
+					//console.log(platforms);
+					//console.log(devices);
+					var clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
+					var clCQ = clCtx.createCommandQueue(devices[0][0], 0);
+					var clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
+					clProgram.buildProgram(devices[0], "");
+					
+					var colorKernel = clProgram.createKernel("getPixelColor");
+					var rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
+					colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
+					colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
+					colorKernel.setKernelArg(2, rasterBuffer);
+					
+					clCQ.enqueueNDRangeKernel(colorKernel, 2, [], [canvas.width, canvas.height], [], []);
+					clCQ.finish();
+					
+					clCQ.enqueueReadBuffer(rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+					canvasCtx.putImageData(raster, 0, 0);
+					
+					rasterBuffer.releaseCLResources();
+					clCQ.releaseCLResources();
+					colorKernel.releaseCLResources();
+					clProgram.releaseCLResources();
+					clCtx.releaseCLResources();
+					
+					//console.log(colorKernel);
+				}catch(e){
+					console.log(e);
+					alert(e);
+					return -1;
+				}
+			}
+		</script>
+	</head>
+	<body onload="main();">
+		<p>Hello, I'm using WebCL to render a black to white gradient on the canvas.</p>
+		<canvas id="myCanvas" width=320 height=240></canvas>
+	</body>
+</html>
+

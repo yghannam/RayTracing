@@ -2,7 +2,7 @@
 Author: Yazen Ghannam
 Spring 2013
 CAP 6721
-Assignment 1a
+Assignment 1
 -->
 <!DOCTYPE html>
 <html>
@@ -10,25 +10,147 @@ Assignment 1a
 		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
 		<meta content="utf-8" http-equiv="encoding">
 		<script id="openclProgram" type="text/x-opencl">
+			float raySphere(float3 rayOrigin, float3 rayDirection, float4 sphere){
+				float3 sphereCenter = (float3)(sphere.x, sphere.y, sphere.z);
+				float sphereRadius = sphere.w;
+				float a = dot(rayDirection, rayDirection);
+				float b = 2.0*(dot(rayOrigin,rayDirection)-dot(sphereCenter,rayDirection));
+				float c = dot(rayOrigin, rayOrigin) - 2.0*dot(sphereCenter, rayOrigin) +dot(sphereCenter, sphereCenter) - sphereRadius*sphereRadius;
+				float radicand = b*b - 4*a*c;
+				if (radicand < 0){
+					return 0;
+				}
+				else if (radicand == 0){
+					return -b/(2*a);
+				}
+				else{
+					float root = sqrt(radicand);
+					float x1 = (-b+root)/(2*a);
+					float x2 = (-b-root)/(2*a);
+					if(x1 > 0 && x2 > 0){
+						return (x1 < x2) ? x1:x2;
+					}
+					else if (x1 > 0 && x2 <= 0){
+						return x1;
+					}
+					else if (x1 <= 0 && x2 > 0){
+						return x2;
+					}
+					else{
+						return 0;
+					}
+				}
+			}
 			__kernel void getPixelColor(
-				const int width,
-				const int height,
+				const int columns,
+				const int rows,
+				const float width,
+				const float height,
+				__global float3 *camera,
+				__global float4 *sphere,
 				__global uchar4 *raster){
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
-					int value = 255*row/height;
-					uchar4 color = (uchar4)(value, value, value, 255);
-					raster[row * width + col] = color;
+					float3 eye = camera[0];
+					float3 at = camera[1];
+					float3 up = camera[2];
+					
+					float3 temp = eye-at;
+					float3 W = temp/normalize(temp);
+					temp = cross(up, W);
+					float3 U = temp/normalize(temp);
+					float3 V = cross(W, U);
+					
+					float3 ray;
+					ray.x = width * ( (col+0.5)/columns - 0.5);
+					ray.y = height * (0.5 - (row+0.5)/rows);
+					ray.z = -1;
+					
+					float t = raySphere(eye, ray, sphere[0]);
+					uchar4 color = (uchar4)(0, 0, 0, 255);
+					if ( t > 0 ){
+						color = ((uchar)sphere[1].x, (uchar)sphere[1].y, (uchar)sphere[1].z, (uchar)sphere[1].w);
+					}
+					
+					raster[row * columns + col] = color;
 				}
 		</script>
 		<script type="text/javascript">
+			function printClError( err)
+			{
+				var errString="";
+				switch (err) {
+					case CL_SUCCESS:                            errString = "Success!"; break;
+					case CL_DEVICE_NOT_FOUND:                   errString = "Device not found."; break;
+					case CL_DEVICE_NOT_AVAILABLE:               errString = "Device not available"; break;
+					case CL_COMPILER_NOT_AVAILABLE:             errString = "Compiler not available"; break;
+					case CL_MEM_OBJECT_ALLOCATION_FAILURE:      errString = "Memory object allocation failure"; break;
+					case CL_OUT_OF_RESOURCES:                   errString = "Out of resources"; break;
+					case CL_OUT_OF_HOST_MEMORY:                 errString = "Out of host memory"; break;
+					case CL_PROFILING_INFO_NOT_AVAILABLE:       errString = "Profiling information not available"; break;
+					case CL_MEM_COPY_OVERLAP:                   errString = "Memory copy overlap"; break;
+					case CL_IMAGE_FORMAT_MISMATCH:              errString = "Image format mismatch"; break;
+					case CL_IMAGE_FORMAT_NOT_SUPPORTED:         errString = "Image format not supported"; break;
+					case CL_BUILD_PROGRAM_FAILURE:              errString = "Program build failure"; break;
+					case CL_MAP_FAILURE:                        errString = "Map failure"; break;
+					case CL_MISALIGNED_SUB_BUFFER_OFFSET:       errString = "Map failure"; break;
+					case CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST: errString = "Execution Status Error for Events in Wait List"; break;
+					case CL_COMPILE_PROGRAM_FAILURE:            errString = "Compile Program failure"; break;
+					case CL_LINKER_NOT_AVAILABLE:               errString = "Linker Not Available"; break;
+					case CL_LINK_PROGRAM_FAILURE:               errString = "Link Program failure"; break;
+					case CL_DEVICE_PARTITION_FAILED:            errString = "Device Partition Failed"; break;
+					case CL_KERNEL_ARG_INFO_NOT_AVAILABLE:      errString = "Kernel Argument Information Not Available"; break;
+					case CL_INVALID_VALUE:                      errString = "Invalid value"; break;
+					case CL_INVALID_DEVICE_TYPE:                errString = "Invalid device type"; break;
+					case CL_INVALID_PLATFORM:                   errString = "Invalid platform"; break;
+					case CL_INVALID_DEVICE:                     errString = "Invalid device"; break;
+					case CL_INVALID_CONTEXT:                    errString = "Invalid context"; break;
+					case CL_INVALID_QUEUE_PROPERTIES:           errString = "Invalid queue properties"; break;
+					case CL_INVALID_COMMAND_QUEUE:              errString = "Invalid command queue"; break;
+					case CL_INVALID_HOST_PTR:                   errString = "Invalid host pointer"; break;
+					case CL_INVALID_MEM_OBJECT:                 errString = "Invalid memory object"; break;
+					case CL_INVALID_IMAGE_FORMAT_DESCRIPTOR:    errString = "Invalid image format descriptor"; break;
+					case CL_INVALID_IMAGE_SIZE:                 errString = "Invalid image size"; break;
+					case CL_INVALID_SAMPLER:                    errString = "Invalid sampler"; break;
+					case CL_INVALID_BINARY:                     errString = "Invalid binary"; break;
+					case CL_INVALID_BUILD_OPTIONS:              errString = "Invalid build options"; break;
+					case CL_INVALID_PROGRAM:                    errString = "Invalid program"; break;
+					case CL_INVALID_PROGRAM_EXECUTABLE:         errString = "Invalid program executable"; break;
+					case CL_INVALID_KERNEL_NAME:                errString = "Invalid kernel name"; break;
+					case CL_INVALID_KERNEL_DEFINITION:          errString = "Invalid kernel definition"; break;
+					case CL_INVALID_KERNEL:                     errString = "Invalid kernel"; break;
+					case CL_INVALID_ARG_INDEX:                  errString = "Invalid argument index"; break;
+					case CL_INVALID_ARG_VALUE:                  errString = "Invalid argument value"; break;
+					case CL_INVALID_ARG_SIZE:                   errString = "Invalid argument size"; break;
+					case CL_INVALID_KERNEL_ARGS:                errString = "Invalid kernel arguments"; break;
+					case CL_INVALID_WORK_DIMENSION:             errString = "Invalid work dimension"; break;
+					case CL_INVALID_WORK_GROUP_SIZE:            errString = "Invalid work group size"; break;
+					case CL_INVALID_WORK_ITEM_SIZE:             errString = "Invalid work item size"; break;
+					case CL_INVALID_GLOBAL_OFFSET:              errString = "Invalid global offset"; break;
+					case CL_INVALID_EVENT_WAIT_LIST:            errString = "Invalid event wait list"; break;
+					case CL_INVALID_EVENT:                      errString = "Invalid event"; break;
+					case CL_INVALID_OPERATION:                  errString = "Invalid operation"; break;
+					case CL_INVALID_GL_OBJECT:                  errString = "Invalid OpenGL object"; break;
+					case CL_INVALID_BUFFER_SIZE:                errString = "Invalid buffer size"; break;
+					case CL_INVALID_MIP_LEVEL:                  errString = "Invalid mip-map level"; break;
+					case CL_INVALID_GLOBAL_WORK_SIZE:           errString = "Invalid Global Work Size"; break;
+					case CL_INVALID_IMAGE_DESCRIPTOR:           errString = "Invalid Image Descriptor";break;
+					case CL_INVALID_COMPILER_OPTIONS:           errString = "Invalid Compiler Options";break;
+					case CL_INVALID_LINKER_OPTIONS:             errString = "Invalid Linker Options";break;
+					case CL_INVALID_DEVICE_PARTITION_COUNT:     errString = "Invalid Device Partition Count";break;
+					default: errString = "Unknown error"; break;
+				}
+				return errString;
+			}
 			function main(){
 				var platforms = null;
 				var devices = [];
 				var canvas = null;
 				var canvasCtx = null;
 				var raster = null;
-				
+				var rv = null;
+				var device = null;
+				var clProgram = null;
 				try{
 					canvas = document.getElementById("myCanvas");
 					canvasCtx = canvas.getContext("2d");
@@ -42,15 +164,34 @@ Assignment 1a
 					//console.log(devices);
 					var clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
 					var clCQ = clCtx.createCommandQueue(devices[0][0], 0);
-					var clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
+					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
+					device = devices[0][0];
 					clProgram.buildProgram(devices[0], "");
+					
+					var wViewPoint = [0.0, 0.0, 4.0];
+					var wAtPoint = [ 0.0, 0.0, 0.0];
+					var upVector = [0.0, 1.0, 0.0];
+					var camera = wViewPoint.concat(wAtPoint, upVector);
+					var cameraBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*camera.length);
+					var fov = 53;
+					var sphere = [0.0, 0.0, 0.0, 1.0, 255.0, 0.0, 0.0, 255.0];
+					var sphereBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*sphere.length);
+					var aspectRatio = canvas.width/canvas.height;
+					var height = 2 * Math.tan(fov*Math.PI/180/2);
+					var width = aspectRatio * height;
 					
 					var colorKernel = clProgram.createKernel("getPixelColor");
 					var rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
 					colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
 					colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
-					colorKernel.setKernelArg(2, rasterBuffer);
+					colorKernel.setKernelArg(2, width, WebCL.types.FLOAT);
+					colorKernel.setKernelArg(3, height, WebCL.types.FLOAT);
+					colorKernel.setKernelArg(4, cameraBuffer);
+					colorKernel.setKernelArg(5, sphereBuffer);
+					colorKernel.setKernelArg(6, rasterBuffer);
 					
+					clCQ.enqueueWriteBuffer(cameraBuffer, true, 0, 4*camera.length, new Float32Array(camera), []);
+					clCQ.enqueueWriteBuffer(sphereBuffer, true, 0, 4*sphere.length, new Float32Array(sphere), []);
 					clCQ.enqueueNDRangeKernel(colorKernel, 2, [], [canvas.width, canvas.height], [], []);
 					clCQ.finish();
 					
@@ -66,7 +207,9 @@ Assignment 1a
 					//console.log(colorKernel);
 				}catch(e){
 					console.log(e);
-					alert(e);
+					console.log(device);
+					console.log(clProgram.getProgramBuildInfo(device, WebCL.CL_PROGRAM_BUILD_LOG));
+					//alert(e);
 					return -1;
 				}
 			}

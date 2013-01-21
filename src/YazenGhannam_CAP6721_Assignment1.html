@@ -10,9 +10,7 @@ Assignment 1
 		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
 		<meta content="utf-8" http-equiv="encoding">
 		<script id="openclProgram" type="text/x-opencl">
-			float raySphere(float3 rayOrigin, float3 rayDirection, float4 sphere){
-				float3 sphereCenter = (float3)(sphere.x, sphere.y, sphere.z);
-				float sphereRadius = sphere.w;
+			float raySphere(float3 rayOrigin, float3 rayDirection, float3 sphereCenter, float sphereRadius){
 				float a = dot(rayDirection, rayDirection);
 				float b = 2.0*(dot(rayOrigin,rayDirection)-dot(sphereCenter,rayDirection));
 				float c = dot(rayOrigin, rayOrigin) - 2.0*dot(sphereCenter, rayOrigin) +dot(sphereCenter, sphereCenter) - sphereRadius*sphereRadius;
@@ -46,8 +44,10 @@ Assignment 1
 				const int rows,
 				const float width,
 				const float height,
+				const int numSpheres,
 				__global float3 *camera,
-				__global float4 *sphere,
+				__global float3 *sphereCenters,
+				__global float *sphereRadii,
 				__global uchar4 *raster){
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
@@ -66,18 +66,97 @@ Assignment 1
 					ray.y = height * (0.5 - (row+0.5)/rows);
 					ray.z = -1;
 					
-					float t = raySphere(eye, ray, sphere[0]);
+					
+					// Object index, t
+					float minT = INFINITY;
+					int objectIndex = -1;
+					for( int i = 0; i < numSpheres; i++){
+						float t = raySphere(eye, ray, sphereCenters[i], sphereRadii[i]);
+						if (t > 0){
+							minT = min(minT, t);
+						}
+						if (minT == t){
+							objectIndex = i;
+						}
+					}
 					uchar4 color = (uchar4)(0, 0, 0, 255);
-					if ( t > 0 ){
-						color = ((uchar)sphere[1].x, (uchar)sphere[1].y, (uchar)sphere[1].z, (uchar)sphere[1].w);
+					if ( objectIndex >= 0 ){
+						color = (uchar4)(255, 255, 255, 255);
 					}
 					
 					raster[row * columns + col] = color;
 				}
 		</script>
 		<script type="text/javascript">
-			function printClError( err)
-			{
+			var model = null;
+			var platforms = null;
+			var devices = [];
+			var canvas = null;
+			var canvasCtx = null;
+			var raster = null;
+			var rv = null;
+			var device = null;
+			var clCtx = null;
+			var clCQ = null;
+			var clProgram = null;
+			var clKernels = new Object();
+			var clBuffers = new Object();
+			
+			function parseJSON(jsonFile){
+				var xhttp = new XMLHttpRequest();
+				xhttp.open("GET", jsonFile, false);				
+				xhttp.overrideMimeType("application/json");
+				xhttp.send(null);
+				//console.log(jsonFile);
+				//console.log(xhttp);
+				return JSON.parse(xhttp.responseText);
+			}
+			
+			function loadFile(){
+				model = parseJSON(document.getElementById("inputFile").value);
+				//console.log(model);
+				run();
+			}
+			
+			function run(){
+				
+				var camera = model.cameras[0].eye.concat(model.cameras[0].at, model.cameras[0].up);
+				//console.log(camera);
+				clBuffers.cameraBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*camera.length);
+				var fov = model.cameras[0].fov;
+				//console.log(fov);
+				clBuffers.sphereCentersBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*model.spheres[0].centers.length);
+				clBuffers.sphereRadiiBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*model.spheres[0].radii.length);
+				var aspectRatio = canvas.width/canvas.height;
+				var height = 2 * Math.tan(fov*Math.PI/180/2);
+				var width = aspectRatio * height;
+				
+				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
+				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
+				clKernels.colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
+				clKernels.colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
+				clKernels.colorKernel.setKernelArg(2, width, WebCL.types.FLOAT);
+				clKernels.colorKernel.setKernelArg(3, height, WebCL.types.FLOAT);
+				clKernels.colorKernel.setKernelArg(4, model.spheres[0].radii.length, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(5, clBuffers.cameraBuffer);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.sphereCentersBuffer);
+				clKernels.colorKernel.setKernelArg(7, clBuffers.sphereRadiiBuffer);
+				clKernels.colorKernel.setKernelArg(8, clBuffers.rasterBuffer);
+					
+				clCQ.enqueueWriteBuffer(clBuffers.cameraBuffer, true, 0, 4*camera.length, new Float32Array(camera), []);
+				clCQ.enqueueWriteBuffer(clBuffers.sphereCentersBuffer, true, 0, 4*model.spheres[0].centers.length, new Float32Array(model.spheres[0].centers), []);
+				clCQ.enqueueWriteBuffer(clBuffers.sphereRadiiBuffer, true, 0, 4*model.spheres[0].radii.length, new Float32Array(model.spheres[0].radii), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
+				clCQ.finish();
+					
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+					
+					
+					
+			}
+			
+			function printClError(err){
 				var errString="";
 				switch (err) {
 					case CL_SUCCESS:                            errString = "Success!"; break;
@@ -143,14 +222,8 @@ Assignment 1
 				return errString;
 			}
 			function main(){
-				var platforms = null;
-				var devices = [];
-				var canvas = null;
-				var canvasCtx = null;
-				var raster = null;
-				var rv = null;
-				var device = null;
-				var clProgram = null;
+				document.getElementById("inputFile").value = "";
+				
 				try{
 					canvas = document.getElementById("myCanvas");
 					canvasCtx = canvas.getContext("2d");
@@ -158,53 +231,17 @@ Assignment 1
 					
 					platforms = WebCL.getPlatformIDs();
 					for ( var i in platforms ){
-						devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_ALL);
+						devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_DEFAULT);
 					}
 					//console.log(platforms);
 					//console.log(devices);
-					var clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
-					var clCQ = clCtx.createCommandQueue(devices[0][0], 0);
+					clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
+					clCQ = clCtx.createCommandQueue(devices[0][0], 0);
 					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
-					device = devices[0][0];
 					clProgram.buildProgram(devices[0], "");
 					
-					var wViewPoint = [0.0, 0.0, 4.0];
-					var wAtPoint = [ 0.0, 0.0, 0.0];
-					var upVector = [0.0, 1.0, 0.0];
-					var camera = wViewPoint.concat(wAtPoint, upVector);
-					var cameraBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*camera.length);
-					var fov = 53;
-					var sphere = [0.0, 0.0, 0.0, 1.0, 255.0, 0.0, 0.0, 255.0];
-					var sphereBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*sphere.length);
-					var aspectRatio = canvas.width/canvas.height;
-					var height = 2 * Math.tan(fov*Math.PI/180/2);
-					var width = aspectRatio * height;
 					
-					var colorKernel = clProgram.createKernel("getPixelColor");
-					var rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
-					colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
-					colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
-					colorKernel.setKernelArg(2, width, WebCL.types.FLOAT);
-					colorKernel.setKernelArg(3, height, WebCL.types.FLOAT);
-					colorKernel.setKernelArg(4, cameraBuffer);
-					colorKernel.setKernelArg(5, sphereBuffer);
-					colorKernel.setKernelArg(6, rasterBuffer);
-					
-					clCQ.enqueueWriteBuffer(cameraBuffer, true, 0, 4*camera.length, new Float32Array(camera), []);
-					clCQ.enqueueWriteBuffer(sphereBuffer, true, 0, 4*sphere.length, new Float32Array(sphere), []);
-					clCQ.enqueueNDRangeKernel(colorKernel, 2, [], [canvas.width, canvas.height], [], []);
-					clCQ.finish();
-					
-					clCQ.enqueueReadBuffer(rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
-					canvasCtx.putImageData(raster, 0, 0);
-					
-					rasterBuffer.releaseCLResources();
-					clCQ.releaseCLResources();
-					colorKernel.releaseCLResources();
-					clProgram.releaseCLResources();
-					clCtx.releaseCLResources();
-					
-					//console.log(colorKernel);
+					//console.log(clBuffers);
 				}catch(e){
 					console.log(e);
 					console.log(device);
@@ -213,10 +250,24 @@ Assignment 1
 					return -1;
 				}
 			}
+			
+			function releaseResources(){
+				for ( x in clBuffers){
+					clBuffers[x].releaseCLResources();
+				}
+				for ( x in clKernels){
+					clKernels[x].releaseCLResources();
+				}
+				clCQ.releaseCLResources();
+				clProgram.releaseCLResources();
+				clCtx.releaseCLResources();
+			}
 		</script>
 	</head>
-	<body onload="main();">
+	<body onload="main();" onunload="releaseResources();">
 		<p>Hello, I'm using WebCL to render a black to white gradient on the canvas.</p>
+		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
+		<br>
 		<canvas id="myCanvas" width=320 height=240></canvas>
 	</body>
 </html>

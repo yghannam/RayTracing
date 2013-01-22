@@ -10,79 +10,145 @@ Assignment 1
 		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
 		<meta content="utf-8" http-equiv="encoding">
 		<script id="openclProgram" type="text/x-opencl">
-			float raySphere(float3 rayOrigin, float3 rayDirection, float3 sphereCenter, float sphereRadius){
-				float a = dot(rayDirection, rayDirection);
-				float b = 2.0*(dot(rayOrigin,rayDirection)-dot(sphereCenter,rayDirection));
-				float c = dot(rayOrigin, rayOrigin) - 2.0*dot(sphereCenter, rayOrigin) +dot(sphereCenter, sphereCenter) - sphereRadius*sphereRadius;
-				float radicand = b*b - 4*a*c;
-				if (radicand < 0){
-					return 0;
+			float rayPlane(
+				float3 rayOrigin, 
+				float3 rayDirection, 
+				float3 normal,
+				float3 point){
+					float t = 0;					
+					float rayNormal = dot(rayDirection, normal);
+					if( rayNormal != 0){
+						t = dot(point-rayOrigin, normal)/rayNormal;
+					}					
+					return (t>0) ? t : 0;
 				}
-				else if (radicand == 0){
-					return -b/(2*a);
+			float rayTriangle(
+				float3 rayOrigin, 
+				float3 rayDirection, 
+				float3 p0,
+				float3 p1,
+				float3 p2){
+				float t = 0;
+				
+				/*
+				float3 normal = cross(p1-p0, p2-p0);
+				t = rayPlane(rayOrigin, rayDirection, normal, p0);
+				if(t > 0){
+					float3 p = rayOrigin + t*rayDirection;
+					float normalSquared = dot(normal, normal);
+					float alpha = dot(normal, cross(p-p0, p2-p0))/normalSquared;
+					float beta = dot(normal, cross(p1-p0, p-p0))/normalSquared;
+					
+					if(alpha < 0 || beta < 0 || alpha+beta > 1){
+						t = 0;
+					}
+				}
+				*/
+				float3 e1 = p1-p0;
+				float3 e2 = p2-p0;
+				float3 s = rayOrigin-p0;
+				float invDet = 1.0f / dot(cross(rayDirection, e2), e1);
+				t = invDet * dot(cross(s, e1), e2);
+				float alpha = invDet * dot(cross(rayDirection, e2), s);
+				float beta = invDet * dot(cross(s, e1), rayDirection);
+				
+				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
+					t = 0;
+				}
+				
+				return t;
+			}
+			float raySphere(
+				float3 rayOrigin, 
+				float3 rayDirection, 
+				float3 sphereCenter, 
+				float sphereRadius){
+				float t = 0;
+				float a = dot(rayDirection, rayDirection);
+				float b = 2.0f * dot(rayOrigin-sphereCenter,rayDirection);
+				float c = dot(rayOrigin-sphereCenter,rayOrigin-sphereCenter) - sphereRadius*sphereRadius;
+				float discriminant = b*b - 4.0f*a*c;
+				if (discriminant == 0){
+					t = -b/(2.0f*a);
 				}
 				else{
-					float root = sqrt(radicand);
-					float x1 = (-b+root)/(2*a);
-					float x2 = (-b-root)/(2*a);
+					float root = sqrt(discriminant);
+					float q = (b < 0) ? (-0.5f*(b-root)) : (-0.5f*(b+root));
+					float x1 = q/a;
+					float x2 = c/q;
 					if(x1 > 0 && x2 > 0){
-						return (x1 < x2) ? x1:x2;
+						t = (x1 < x2) ? x1:x2;
 					}
 					else if (x1 > 0 && x2 <= 0){
-						return x1;
+						t = x1;
 					}
 					else if (x1 <= 0 && x2 > 0){
-						return x2;
+						t = x2;
 					}
 					else{
-						return 0;
+						t = -1;
 					}
 				}
+				return t;
 			}
 			__kernel void getPixelColor(
 				const int columns,
 				const int rows,
 				const float width,
 				const float height,
-				const int numSpheres,
-				__global float3 *camera,
-				__global float3 *sphereCenters,
-				__global float *sphereRadii,
-				__global uchar4 *raster){
+				const int shapeType,
+				const int numShapes,
+				__global float4 *camera,
+				__global float4 *shapeData,
+				__global uint4 *shapeIndices,
+				__global uchar4 *raster,
+				__global float4 *debug){
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
-					float3 eye = camera[0];
-					float3 at = camera[1];
-					float3 up = camera[2];
+					float3 eye = camera[0].xyz;
+					float3 at = camera[1].xyz;
+					float3 up = camera[2].xyz;
 					
-					float3 temp = eye-at;
-					float3 W = temp/normalize(temp);
-					temp = cross(up, W);
-					float3 U = temp/normalize(temp);
+					float3 W = normalize(eye-at);
+					float3 U = normalize(cross(up,W));
 					float3 V = cross(W, U);
-					
 					float3 ray;
-					ray.x = width * ( (col+0.5)/columns - 0.5);
-					ray.y = height * (0.5 - (row+0.5)/rows);
-					ray.z = -1;
+					ray.x = width * ( (col+0.5f)/columns - 0.5f);
+					ray.y = height * (0.5f - (row+0.5f)/rows);
+					ray.z = -1.f;
 					
 					
-					// Object index, t
-					float minT = INFINITY;
-					int objectIndex = -1;
-					for( int i = 0; i < numSpheres; i++){
-						float t = raySphere(eye, ray, sphereCenters[i], sphereRadii[i]);
-						if (t > 0){
-							minT = min(minT, t);
-						}
-						if (minT == t){
-							objectIndex = i;
-						}
-					}
+					float3 transformedRay;
+					transformedRay.x = U.x*ray.x + V.x*ray.y + W.x*ray.z;
+					transformedRay.y = U.y*ray.x + V.y*ray.y + W.y*ray.z;
+					transformedRay.z = U.z*ray.x + V.z*ray.y + W.z*ray.z;
+					
 					uchar4 color = (uchar4)(0, 0, 0, 255);
-					if ( objectIndex >= 0 ){
-						color = (uchar4)(255, 255, 255, 255);
+					unsigned int i = 0;
+					if(shapeType == 1){
+						for( i = 0; i < numShapes; i++){
+							//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+							float t = 0;							
+							t = raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w);
+							if (t > 0){
+								color = (uchar4)(255, 0, 255, 255);
+							}
+						}
 					}
+					else if(shapeType == 2){
+						for( i = 0; i < numShapes; i++){
+							//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+							float t = 0;	
+							float3 p0 = shapeData[shapeIndices[i].x].xyz;
+							float3 p1 = shapeData[shapeIndices[i].y].xyz;
+							float3 p2 = shapeData[shapeIndices[i].z].xyz;
+							t = rayTriangle(eye, transformedRay, p0, p1, p2);
+							if (t > 0){
+								color = (uchar4)(255, 0, 255, 255);
+							}
+						}
+					}
+					
 					
 					raster[row * columns + col] = color;
 				}
@@ -118,42 +184,91 @@ Assignment 1
 				run();
 			}
 			
+			function padArray(array, currentSize){
+				var paddedArray = new Array();
+				var j = 0;
+				for(var i = 0; i < array.length; i++, j++){
+					if(i > 0 && i % currentSize == 0){
+						paddedArray[j++] = 0;
+						//paddedArray[++j] = array[i];
+					}
+					paddedArray[j] = array[i];
+				}
+				paddedArray[j] = 0;
+				return paddedArray;
+			}
+			
 			function run(){
 				
-				var camera = model.cameras[0].eye.concat(model.cameras[0].at, model.cameras[0].up);
+				var camera = padArray(model.cameras[0].eye.concat(model.cameras[0].at, model.cameras[0].up), 3);
 				//console.log(camera);
 				clBuffers.cameraBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*camera.length);
 				var fov = model.cameras[0].fov;
 				//console.log(fov);
-				clBuffers.sphereCentersBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*model.spheres[0].centers.length);
-				clBuffers.sphereRadiiBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*model.spheres[0].radii.length);
+				
+				var shapeType = 0;
+				var shapeData = new Array();
+				var shapeIndices = new Array();
+				var numShapes = 0;
+				if(model.spheres){
+					shapeType = 1;
+					var j = 0, k = 0;
+					for(var i = 0; i < model.spheres[0].centers.length; i++, k++){
+						if(i > 0 && i % 3 == 0){
+							shapeData[k++] = model.spheres[0].radii[j++];
+						}
+						shapeData[k] = model.spheres[0].centers[i];
+					}
+					shapeData[k] = model.spheres[0].radii[j];
+					shapeIndices[0] = 0;
+					numShapes = shapeData.length/4;
+				}
+				else if(model.meshes){
+					shapeType = 2;
+					shapeData = padArray(model.meshes[0].vertexPositions, 3);
+					shapeIndices = padArray(model.meshes[0].indices, 3);
+					numShapes = shapeIndices.length/4;
+				}
+				//console.log(shapeIndices);
+				//var sphereCenters = padArray(model.spheres[0].centers, 3);
+				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
+				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
 				var aspectRatio = canvas.width/canvas.height;
 				var height = 2 * Math.tan(fov*Math.PI/180/2);
 				var width = aspectRatio * height;
-				
 				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
 				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
+				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
 				clKernels.colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
 				clKernels.colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
 				clKernels.colorKernel.setKernelArg(2, width, WebCL.types.FLOAT);
 				clKernels.colorKernel.setKernelArg(3, height, WebCL.types.FLOAT);
-				clKernels.colorKernel.setKernelArg(4, model.spheres[0].radii.length, WebCL.types.INT);
-				clKernels.colorKernel.setKernelArg(5, clBuffers.cameraBuffer);
-				clKernels.colorKernel.setKernelArg(6, clBuffers.sphereCentersBuffer);
-				clKernels.colorKernel.setKernelArg(7, clBuffers.sphereRadiiBuffer);
-				clKernels.colorKernel.setKernelArg(8, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(4, shapeType, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(5, numShapes, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.cameraBuffer);
+				clKernels.colorKernel.setKernelArg(7, clBuffers.shapeDataBuffer);
+				clKernels.colorKernel.setKernelArg(8, clBuffers.shapeIndicesBuffer);
+				clKernels.colorKernel.setKernelArg(9, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(10, clBuffers.debugBuffer);
 					
 				clCQ.enqueueWriteBuffer(clBuffers.cameraBuffer, true, 0, 4*camera.length, new Float32Array(camera), []);
-				clCQ.enqueueWriteBuffer(clBuffers.sphereCentersBuffer, true, 0, 4*model.spheres[0].centers.length, new Float32Array(model.spheres[0].centers), []);
-				clCQ.enqueueWriteBuffer(clBuffers.sphereRadiiBuffer, true, 0, 4*model.spheres[0].radii.length, new Float32Array(model.spheres[0].radii), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
 				clCQ.finish();
 					
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
-					
-					
-					
+				//var debug = new Float32Array(sphereCenters.length);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*sphereCenters.length, debug, []);
+				
+				//console.log(debug);
+				for ( x in clBuffers){
+					clBuffers[x].releaseCLResources();
+				}
+				for ( x in clKernels){
+					clKernels[x].releaseCLResources();
+				}					
 			}
 			
 			function printClError(err){
@@ -244,9 +359,7 @@ Assignment 1
 					//console.log(clBuffers);
 				}catch(e){
 					console.log(e);
-					console.log(device);
-					console.log(clProgram.getProgramBuildInfo(device, WebCL.CL_PROGRAM_BUILD_LOG));
-					//alert(e);
+					console.log(clProgram.getProgramBuildInfo(devices[0][0], WebCL.CL_PROGRAM_BUILD_LOG));
 					return -1;
 				}
 			}
@@ -265,7 +378,7 @@ Assignment 1
 		</script>
 	</head>
 	<body onload="main();" onunload="releaseResources();">
-		<p>Hello, I'm using WebCL to render a black to white gradient on the canvas.</p>
+		<p>Hello, please select a file.</p>
 		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
 		<br>
 		<canvas id="myCanvas" width=320 height=240></canvas>

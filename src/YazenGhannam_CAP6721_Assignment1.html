@@ -15,12 +15,12 @@ Assignment 1
 				float3 rayDirection, 
 				float3 normal,
 				float3 point){
-					float t = 0;					
+					float t = INFINITY;					
 					float rayNormal = dot(rayDirection, normal);
 					if( rayNormal != 0){
 						t = dot(point-rayOrigin, normal)/rayNormal;
 					}					
-					return (t>0) ? t : 0;
+					return (t>0) ? t : INFINITY;
 				}
 			float rayTriangle(
 				float3 rayOrigin, 
@@ -28,7 +28,7 @@ Assignment 1
 				float3 p0,
 				float3 p1,
 				float3 p2){
-				float t = 0;
+				float t = INFINITY;
 				
 				/*
 				float3 normal = cross(p1-p0, p2-p0);
@@ -53,7 +53,7 @@ Assignment 1
 				float beta = invDet * dot(cross(s, e1), rayDirection);
 				
 				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
-					t = 0;
+					t = INFINITY;
 				}
 				
 				return t;
@@ -63,7 +63,7 @@ Assignment 1
 				float3 rayDirection, 
 				float3 sphereCenter, 
 				float sphereRadius){
-				float t = 0;
+				float t = INFINITY;
 				float a = dot(rayDirection, rayDirection);
 				float b = 2.0f * dot(rayOrigin-sphereCenter,rayDirection);
 				float c = dot(rayOrigin-sphereCenter,rayOrigin-sphereCenter) - sphereRadius*sphereRadius;
@@ -86,7 +86,7 @@ Assignment 1
 						t = x2;
 					}
 					else{
-						t = -1;
+						t = INFINITY;
 					}
 				}
 				return t;
@@ -122,30 +122,28 @@ Assignment 1
 					transformedRay.z = U.z*ray.x + V.z*ray.y + W.z*ray.z;
 					
 					uchar4 color = (uchar4)(0, 0, 0, 255);
+					float t = INFINITY;
 					unsigned int i = 0;
 					if(shapeType == 1){
 						for( i = 0; i < numShapes; i++){
 							//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-							float t = 0;							
-							t = raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w);
-							if (t > 0){
-								color = (uchar4)(255, 0, 255, 255);
-							}
+							//float t = 0;
+							t = min(t, raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w));
 						}
 					}
 					else if(shapeType == 2){
 						for( i = 0; i < numShapes; i++){
 							//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-							float t = 0;	
+							//float t = 0;	
 							float3 p0 = shapeData[shapeIndices[i].x].xyz;
 							float3 p1 = shapeData[shapeIndices[i].y].xyz;
 							float3 p2 = shapeData[shapeIndices[i].z].xyz;
-							t = rayTriangle(eye, transformedRay, p0, p1, p2);
-							if (t > 0){
-								color = (uchar4)(255, 0, 255, 255);
-							}
+							t = min(t, rayTriangle(eye, transformedRay, p0, p1, p2));
 						}
-					}			
+					}
+					if (t < INFINITY){
+						color = (uchar4)(255, 0, 255, 255);
+					}					
 					
 					raster[row * columns + col] = color;
 				}
@@ -255,8 +253,11 @@ Assignment 1
 			}
 			
 			function updateCamera(){
-				
-				camera.eye[2] *= -1;//[boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+				camera.phi += Math.PI/90;
+				//camera.theta += Math.PI/360;
+				camera.eye[0] = camera.radius * Math.sin(camera.theta) * Math.cos(camera.phi);
+				camera.eye[1] = camera.radius * Math.cos(camera.theta);
+				camera.eye[2] = camera.radius * Math.sin(camera.theta) * Math.sin(camera.phi);//[boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
 				
 				var W = normalize( subtractVec(camera.eye, camera.at));
 				var U = normalize( cross(camera.up, W));
@@ -357,6 +358,10 @@ Assignment 1
 					camera.up = [0, 1, 0];
 					camera.fov = 45;
 				}
+				
+				camera.radius = vecLength(subtractVec(camera.eye, camera.at));
+				camera.phi = 0;
+				camera.theta = 90 * Math.PI / 180;
 				
 				var W = normalize( subtractVec(camera.eye, camera.at));
 				var U = normalize( cross(camera.up, W));

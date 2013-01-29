@@ -22,7 +22,8 @@ Assignment 1
 					}					
 					return (t>0) ? t : INFINITY;
 				}
-			float rayTriangle(
+				
+			float3 rayTriangle(
 				float3 rayOrigin, 
 				float3 rayDirection, 
 				float3 p0,
@@ -56,7 +57,7 @@ Assignment 1
 					t = INFINITY;
 				}
 				
-				return t;
+				return (float3)(t, alpha, beta);
 			}
 			float raySphere(
 				float3 rayOrigin, 
@@ -96,6 +97,7 @@ Assignment 1
 				const int numShapes,
 				__global float4 *viewData,
 				__global float4 *shapeData,
+				__global float4 *shapeNormals,
 				__global uint4 *shapeIndices,
 				__global uchar4 *raster,
 				__global float4 *debug){
@@ -127,6 +129,8 @@ Assignment 1
 					float3 L;
 					//float3 V;
 					float3 R;
+					float alpha;
+					float beta;
 					
 					float t = INFINITY;
 					int shapeIndex = -1;
@@ -150,9 +154,11 @@ Assignment 1
 							float3 p0 = shapeData[shapeIndices[i].x].xyz;
 							float3 p1 = shapeData[shapeIndices[i].y].xyz;
 							float3 p2 = shapeData[shapeIndices[i].z].xyz;
-							float rv = rayTriangle(eye, transformedRay, p0, p1, p2);
-							if ( rv < t ){
-								t = rv;
+							float3 rv = rayTriangle(eye, transformedRay, p0, p1, p2);
+							if ( rv.x < t ){
+								t = rv.x;
+								alpha = rv.y;
+								beta = rv.z;
 								shapeIndex = i;
 							}
 						}
@@ -165,13 +171,18 @@ Assignment 1
 							N = normalize(P-shapeData[shapeIndex].xyz);
 						}
 						else if (shapeType == 2){
-							N = 0;
+							float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
+							float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
+							float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
+							N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
 						}
 						L = normalize((float3)(1, 1, 1));
-						float diffuse = clamp(dot(N, L), 0.0f, 1.f);
-						uchar red = (uchar) round(255*diffuse);
-						uchar green = (uchar) round(255*diffuse);
-						uchar blue = (uchar) round(255*diffuse);
+						float4 diffuse = kd * clamp(dot(N, L), 0.0f, 1.f);
+						float4 Intensity = lightIntensity * diffuse;
+						
+						uchar red = (uchar) round(255*Intensity.x);
+						uchar green = (uchar) round(255*Intensity.y);
+						uchar blue = (uchar) round(255*Intensity.z);
 						color = (uchar4)(red, green, blue, 255);
 					}					
 					
@@ -194,6 +205,8 @@ Assignment 1
 			var clBuffers = new Object();
 			var viewDimensions = null;
 			var camera = new Object();
+			var rotate = false;
+			var sceneLoaded = false;
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -282,6 +295,10 @@ Assignment 1
 				return a;
 			}
 			
+			function updateRotate(){
+				rotate = !rotate;
+			}
+			
 			function updateCamera(){
 				camera.phi += Math.PI/90;
 				//camera.theta += Math.PI/360;
@@ -295,7 +312,7 @@ Assignment 1
 				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
 				var viewData = viewDimensions.concat(cameraData);
 			
-				console.log(cameraData);
+				//console.log(cameraData);
 			
 				var startTime = new Date().getTime();
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
@@ -310,6 +327,7 @@ Assignment 1
 				
 				var shapeType = 0;
 				var shapeData = new Array();
+				var shapeNormals = new Array();
 				var shapeIndices = new Array();
 				var numShapes = 0;
 				if(model.spheres){
@@ -322,12 +340,14 @@ Assignment 1
 						shapeData[k] = model.spheres[0].centers[i];
 					}
 					shapeData[k] = model.spheres[0].radii[j];
+					shapeNormals[0] = 0;
 					shapeIndices[0] = 0;
 					numShapes = shapeData.length/4;
 				}
 				else if(model.meshes){
 					shapeType = 2;
 					shapeData = padArray(model.meshes[0].vertexPositions, 3);
+					shapeNormals = padArray(model.meshes[0].vertexNormals, 3);
 					shapeIndices = padArray(model.meshes[0].indices, 3);
 					numShapes = shapeIndices.length/4;
 				}
@@ -337,6 +357,7 @@ Assignment 1
 				//console.log(shapeIndices);
 				//var sphereCenters = padArray(model.spheres[0].centers, 3);
 				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
+				clBuffers.shapeNormalsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeNormals.length);
 				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
 				
 				var boundingShape = new Object();
@@ -370,7 +391,7 @@ Assignment 1
 					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
 				}
 				
-				console.log(boundingShape);
+				//console.log(boundingShape);
 				
 				var eye = 0;
 				var at = 0;
@@ -412,19 +433,22 @@ Assignment 1
 				clKernels.colorKernel.setKernelArg(1, numShapes, WebCL.types.INT);
 				clKernels.colorKernel.setKernelArg(2, clBuffers.viewDataBuffer);
 				clKernels.colorKernel.setKernelArg(3, clBuffers.shapeDataBuffer);
-				clKernels.colorKernel.setKernelArg(4, clBuffers.shapeIndicesBuffer);
-				clKernels.colorKernel.setKernelArg(5, clBuffers.rasterBuffer);
-				clKernels.colorKernel.setKernelArg(6, clBuffers.debugBuffer);
+				clKernels.colorKernel.setKernelArg(4, clBuffers.shapeNormalsBuffer);
+				clKernels.colorKernel.setKernelArg(5, clBuffers.shapeIndicesBuffer);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(7, clBuffers.debugBuffer);
 				
 				var startTime = new Date().getTime();
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeNormalsBuffer, true, 0, 4*shapeNormals.length, new Float32Array(shapeNormals), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
 				clCQ.finish();
 				console.log("Compute time: "+(new Date().getTime()-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
+				sceneLoaded = true;
 				//var debug = new Float32Array(sphereCenters.length);
 				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*sphereCenters.length, debug, []);
 				
@@ -516,7 +540,12 @@ Assignment 1
 					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
 					clProgram.buildProgram(devices[0], "");
 					
-					
+					var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
+					(function callback(){
+						requestAnimationFrame(callback);
+						if(sceneLoaded && rotate)
+							updateCamera();
+					})();
 					//console.log(clBuffers);
 				}catch(e){
 					console.log(e);
@@ -547,7 +576,7 @@ Assignment 1
 		</div>
 		<div style="float:left">
 			<p>Camera Controls</p>
-			<input type="button" onclick="updateCamera();" value="Refresh">
+			<input type="button" onclick="updateRotate();" value="Start/Stop Rotation">
 		</div>
 	</body>
 </html>

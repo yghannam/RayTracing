@@ -122,14 +122,26 @@ Assignment 1
 					transformedRay.z = U.z*ray.x + V.z*ray.y + W.z*ray.z;
 					
 					uchar4 color = (uchar4)(0, 0, 0, 255);
+					float3 P;
+					float3 N;
+					float3 L;
+					//float3 V;
+					float3 R;
+					
 					float t = INFINITY;
+					int shapeIndex = -1;
 					unsigned int i = 0;
 					if(shapeType == 1){
 						for( i = 0; i < numShapes; i++){
 							//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
 							//float t = 0;
-							t = min(t, raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w));
+							float rv = raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w);
+							if ( rv < t ){
+								t = rv;
+								shapeIndex = i;
+							}
 						}
+						
 					}
 					else if(shapeType == 2){
 						for( i = 0; i < numShapes; i++){
@@ -138,11 +150,29 @@ Assignment 1
 							float3 p0 = shapeData[shapeIndices[i].x].xyz;
 							float3 p1 = shapeData[shapeIndices[i].y].xyz;
 							float3 p2 = shapeData[shapeIndices[i].z].xyz;
-							t = min(t, rayTriangle(eye, transformedRay, p0, p1, p2));
+							float rv = rayTriangle(eye, transformedRay, p0, p1, p2);
+							if ( rv < t ){
+								t = rv;
+								shapeIndex = i;
+							}
 						}
 					}
-					if (t < INFINITY){
-						color = (uchar4)(255, 0, 255, 255);
+					if (t < INFINITY && shapeIndex >= 0){
+						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
+						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+						P = eye + t*transformedRay;
+						if (shapeType == 1){
+							N = normalize(P-shapeData[shapeIndex].xyz);
+						}
+						else if (shapeType == 2){
+							N = 0;
+						}
+						L = normalize((float3)(1, 1, 1));
+						float diffuse = clamp(dot(N, L), 0.0f, 1.f);
+						uchar red = (uchar) round(255*diffuse);
+						uchar green = (uchar) round(255*diffuse);
+						uchar blue = (uchar) round(255*diffuse);
+						color = (uchar4)(red, green, blue, 255);
 					}					
 					
 					raster[row * columns + col] = color;

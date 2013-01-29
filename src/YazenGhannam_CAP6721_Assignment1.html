@@ -92,31 +92,29 @@ Assignment 1
 				return t;
 			}
 			__kernel void getPixelColor(
-				const int columns,
-				const int rows,
-				const float width,
-				const float height,
 				const int shapeType,
 				const int numShapes,
-				__global float4 *camera,
+				__global float4 *viewData,
 				__global float4 *shapeData,
 				__global uint4 *shapeIndices,
 				__global uchar4 *raster,
 				__global float4 *debug){
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
-					float3 eye = camera[0].xyz;
-					float3 at = camera[1].xyz;
-					float3 up = camera[2].xyz;
 					
-					float3 W = normalize(eye-at);
-					float3 U = normalize(cross(up,W));
-					float3 V = cross(W, U);
+					const int columns = (int) viewData[0].x;
+					const int rows = (int) viewData[0].y;
+					const float width = viewData[0].z;
+					const float height = viewData[0].w;
+					float3 eye = viewData[1].xyz;
+					float3 U = viewData[2].xyz;
+					float3 V = viewData[3].xyz;					
+					float3 W = viewData[4].xyz;
+					
 					float3 ray;
 					ray.x = width * ( (col+0.5f)/columns - 0.5f);
 					ray.y = height * (0.5f - (row+0.5f)/rows);
-					ray.z = -1.f;
-					
+					ray.z = -1.f;					
 					
 					float3 transformedRay;
 					transformedRay.x = U.x*ray.x + V.x*ray.y + W.x*ray.z;
@@ -147,8 +145,7 @@ Assignment 1
 								color = (uchar4)(255, 0, 255, 255);
 							}
 						}
-					}
-					
+					}			
 					
 					raster[row * columns + col] = color;
 				}
@@ -167,6 +164,8 @@ Assignment 1
 			var clProgram = null;
 			var clKernels = new Object();
 			var clBuffers = new Object();
+			var viewDimensions = null;
+			var camera = new Object();
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -181,7 +180,7 @@ Assignment 1
 			function loadFile(){
 				model = parseJSON(document.getElementById("inputFile").value);
 				//console.log(model);
-				run();
+				loadScene();
 			}
 			
 			function padArray(array, currentSize){
@@ -198,13 +197,85 @@ Assignment 1
 				return paddedArray;
 			}
 			
-			function run(){
+			function vecLength(array){
+				var total = 0;
+				for(x in array){
+					total += array[x]*array[x];
+				}
+				return Math.sqrt(total);
+			}
+			
+			function normalize(array){
+				var length = vecLength(array);
+				for(x in array){
+					array[x] /= length;
+				}
+				return array;
+			}
+			
+			function cross(a, b){
+				if(a.length != b.length || a.length != 3)
+					throw "cross: vectors must be length 3.";
+				var c = new Array();
+				c[0] = a[1]*b[2] - a[2]*b[1];
+				c[1] = -(a[0]*b[2] - a[2]*b[0]);
+				c[2] = a[0]*b[1] - a[1]*b[0];
 				
-				var camera = padArray(model.cameras[0].eye.concat(model.cameras[0].at, model.cameras[0].up), 3);
-				//console.log(camera);
-				clBuffers.cameraBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*camera.length);
-				var fov = model.cameras[0].fov;
-				//console.log(fov);
+				return c;
+			}
+			
+			function addVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]+b[x];
+				}
+				
+				return c;
+			}
+			
+			function subtractVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]-b[x];
+				}				
+				return c;
+			}
+			
+			function divideVec(a, num){				
+				for (x in a){
+					a[x] /= num;
+				}				
+				return a;
+			}
+			
+			function updateCamera(){
+				
+				camera.eye[2] *= -1;//[boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var viewData = viewDimensions.concat(cameraData);
+			
+				console.log(cameraData);
+			
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
+				clCQ.finish();
+				console.log("Compute time: "+(new Date().getTime()-startTime));	
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+			}
+			
+			function loadScene(){
 				
 				var shapeType = 0;
 				var shapeData = new Array();
@@ -229,46 +300,101 @@ Assignment 1
 					shapeIndices = padArray(model.meshes[0].indices, 3);
 					numShapes = shapeIndices.length/4;
 				}
+				else{
+					throw "Model error: No shape data";
+				}
 				//console.log(shapeIndices);
 				//var sphereCenters = padArray(model.spheres[0].centers, 3);
 				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
 				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
-				var aspectRatio = canvas.width/canvas.height;
-				var height = 2 * Math.tan(fov*Math.PI/180/2);
-				var width = aspectRatio * height;
-				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
-				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, canvas.width*canvas.height*4);					
-				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
-				clKernels.colorKernel.setKernelArg(0, canvas.width, WebCL.types.UINT);
-				clKernels.colorKernel.setKernelArg(1, canvas.height, WebCL.types.UINT);
-				clKernels.colorKernel.setKernelArg(2, width, WebCL.types.FLOAT);
-				clKernels.colorKernel.setKernelArg(3, height, WebCL.types.FLOAT);
-				clKernels.colorKernel.setKernelArg(4, shapeType, WebCL.types.INT);
-				clKernels.colorKernel.setKernelArg(5, numShapes, WebCL.types.INT);
-				clKernels.colorKernel.setKernelArg(6, clBuffers.cameraBuffer);
-				clKernels.colorKernel.setKernelArg(7, clBuffers.shapeDataBuffer);
-				clKernels.colorKernel.setKernelArg(8, clBuffers.shapeIndicesBuffer);
-				clKernels.colorKernel.setKernelArg(9, clBuffers.rasterBuffer);
-				clKernels.colorKernel.setKernelArg(10, clBuffers.debugBuffer);
+				
+				var boundingShape = new Object();
+				
+				var xmin = Number.MAX_VALUE;
+				var ymin = Number.MAX_VALUE;
+				var zmin = Number.MAX_VALUE;
 					
-				clCQ.enqueueWriteBuffer(clBuffers.cameraBuffer, true, 0, 4*camera.length, new Float32Array(camera), []);
+				var xmax = Number.MIN_VALUE;
+				var ymax = Number.MIN_VALUE;
+				var zmax = Number.MIN_VALUE;
+				
+				if(shapeType == 1){
+				//TODO: Bounding Sphere
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					for( var i = 0; i < vertices.length; i+=3){
+						xmin = Math.min(xmin, vertices[i]);
+						ymin = Math.min(ymin, vertices[i+1]);
+						zmin = Math.min(zmin, vertices[i+2]);
+						
+						xmax = Math.max(xmax, vertices[i]);
+						ymax = Math.max(ymax, vertices[i+1]);
+						zmax = Math.max(zmax, vertices[i+2]);
+					}
+					boundingShape.min = [xmin, ymin, zmin];
+					boundingShape.max = [xmax, ymax, zmax];
+					boundingShape.center = divideVec(addVec(boundingShape.max, boundingShape.min), 2);
+					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
+				}
+				
+				console.log(boundingShape);
+				
+				var eye = 0;
+				var at = 0;
+				var up = 0;
+				var fov = 0;
+				if( model.cameras ){
+					camera.eye = model.cameras[0].eye;
+					camera.at = model.cameras[0].at;
+					camera.up = model.cameras[0].up;
+					camera.fov = model.cameras[0].fov;
+				}
+				else{
+					camera.eye = [boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+					camera.at = boundingShape.center;
+					camera.up = [0, 1, 0];
+					camera.fov = 45;
+				}
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var aspectRatio = canvas.width/canvas.height;
+				var height = 2 * Math.tan(camera.fov*Math.PI/180/2);
+				var width = aspectRatio * height;
+				viewDimensions = [canvas.width, canvas.height, width, height];
+				var viewData = viewDimensions.concat(cameraData);
+				//console.log(fov, width);
+				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
+				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*canvas.width*canvas.height);
+				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
+
+				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
+				clKernels.colorKernel.setKernelArg(0, shapeType, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(1, numShapes, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(2, clBuffers.viewDataBuffer);
+				clKernels.colorKernel.setKernelArg(3, clBuffers.shapeDataBuffer);
+				clKernels.colorKernel.setKernelArg(4, clBuffers.shapeIndicesBuffer);
+				clKernels.colorKernel.setKernelArg(5, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.debugBuffer);
+				
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
 				clCQ.finish();
-					
+				console.log("Compute time: "+(new Date().getTime()-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 				//var debug = new Float32Array(sphereCenters.length);
 				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*sphereCenters.length, debug, []);
 				
 				//console.log(debug);
-				for ( x in clBuffers){
-					clBuffers[x].releaseCLResources();
-				}
-				for ( x in clKernels){
-					clKernels[x].releaseCLResources();
-				}					
+					
 			}
 			
 			function printClError(err){
@@ -338,7 +464,7 @@ Assignment 1
 			}
 			function main(){
 				document.getElementById("inputFile").value = "";
-				
+								
 				try{
 					canvas = document.getElementById("myCanvas");
 					canvasCtx = canvas.getContext("2d");
@@ -378,10 +504,16 @@ Assignment 1
 		</script>
 	</head>
 	<body onload="main();" onunload="releaseResources();">
-		<p>Hello, please select a file.</p>
+		<p>Hello, please select a file. The file must be in the current directory.</p>
 		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
 		<br>
-		<canvas id="myCanvas" width=320 height=240></canvas>
+		<div style="float:left">
+			<canvas id="myCanvas" width="320" height="240"></canvas>
+		</div>
+		<div style="float:left">
+			<p>Camera Controls</p>
+			<input type="button" onclick="updateCamera();" value="Refresh">
+		</div>
 	</body>
 </html>
 

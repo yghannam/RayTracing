@@ -126,8 +126,8 @@ Assignment 1
 					uchar4 color = (uchar4)(0, 0, 0, 255);
 					float3 P;
 					float3 N;
-					float3 L;
-					//float3 V;
+					float3 L = normalize((float3)(1.f,1.f,1.f));
+					float3 View = normalize( -transformedRay);
 					float3 R;
 					float alpha;
 					float beta;
@@ -166,6 +166,9 @@ Assignment 1
 					if (t < INFINITY && shapeIndex >= 0){
 						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
 						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
+						float shininess = 10;
+						
 						P = eye + t*transformedRay;
 						if (shapeType == 1){
 							N = normalize(P-shapeData[shapeIndex].xyz);
@@ -176,9 +179,10 @@ Assignment 1
 							float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
 							N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
 						}
-						L = normalize((float3)(1, 1, 1));
+						R = normalize( 2 * N * clamp(dot(L, N), 0.0f, 1.f) - L);
 						float4 diffuse = kd * clamp(dot(N, L), 0.0f, 1.f);
-						float4 Intensity = lightIntensity * diffuse;
+						float4 specular = ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+						float4 Intensity = lightIntensity * (diffuse+specular);
 						
 						uchar red = (uchar) round(255*Intensity.x);
 						uchar green = (uchar) round(255*Intensity.y);

@@ -10,22 +10,29 @@ Assignment 1
 		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
 		<meta content="utf-8" http-equiv="encoding">
 		<script id="openclProgram" type="text/x-opencl">
+			typedef struct {
+				float3 d, o;
+			}Ray;
+			
+			typedef struct{
+				float3 c;
+				float r;
+			}Sphere;
+			
 			float rayPlane(
-				float3 rayOrigin, 
-				float3 rayDirection, 
+				Ray *ray, 
 				float3 normal,
 				float3 point){
 					float t = INFINITY;					
-					float rayNormal = dot(rayDirection, normal);
+					float rayNormal = dot(ray->d, normal);
 					if( rayNormal != 0){
-						t = dot(point-rayOrigin, normal)/rayNormal;
+						t = dot(point-ray->o, normal)/rayNormal;
 					}					
 					return (t>0) ? t : INFINITY;
 				}
 				
 			float3 rayTriangle(
-				float3 rayOrigin, 
-				float3 rayDirection, 
+				Ray* ray, 
 				float3 p0,
 				float3 p1,
 				float3 p2){
@@ -47,11 +54,11 @@ Assignment 1
 				*/
 				float3 e1 = p1-p0;
 				float3 e2 = p2-p0;
-				float3 s = rayOrigin-p0;
-				float invDet = 1.0f / dot(cross(rayDirection, e2), e1);
+				float3 s = ray->o-p0;
+				float invDet = 1.0f / dot(cross(ray->d, e2), e1);
 				t = invDet * dot(cross(s, e1), e2);
-				float alpha = invDet * dot(cross(rayDirection, e2), s);
-				float beta = invDet * dot(cross(s, e1), rayDirection);
+				float alpha = invDet * dot(cross(ray->d, e2), s);
+				float beta = invDet * dot(cross(s, e1), ray->d);
 				
 				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
 					t = INFINITY;
@@ -60,14 +67,12 @@ Assignment 1
 				return (float3)(t, alpha, beta);
 			}
 			float raySphere(
-				float3 rayOrigin, 
-				float3 rayDirection, 
-				float3 sphereCenter, 
-				float sphereRadius){
+				Ray* ray, 
+				Sphere* sphere){
 				float t = INFINITY;
-				float a = dot(rayDirection, rayDirection);
-				float b = 2.0f * dot(rayOrigin-sphereCenter,rayDirection);
-				float c = dot(rayOrigin-sphereCenter,rayOrigin-sphereCenter) - sphereRadius*sphereRadius;
+				float a = dot(ray->d, ray->d);
+				float b = 2.0f * dot(ray->o - sphere->c ,ray->d);
+				float c = dot(ray->o-sphere->c,ray->o-sphere->c) - sphere->r*sphere->r;
 				float discriminant = b*b - 4.0f*a*c;
 				if (discriminant == 0){
 					t = -b/(2.0f*a);
@@ -92,6 +97,147 @@ Assignment 1
 				}
 				return t;
 			}
+			
+			float3 reflect(float3 normal, float3 incident){
+			
+				return normalize( 2 * normal * clamp(dot(normalize(incident), normal), 0.0f, 1.f) - incident);
+			
+			}
+			
+			bool boundingBoxIntersect(Ray* ray, float3 boundMin, float3 boundMax){
+				float temp = 1.f / ray->d.x;
+				float txmin = (boundMin.x - ray->o.x) * temp;
+				float txmax = (boundMax.x - ray->o.x) * temp;
+				if( txmin > txmax){
+					temp = txmin;
+					txmin = txmax;
+					txmax = temp;
+				}
+					
+				temp = 1.f / ray->d.y;
+				float tymin = (boundMin.y - ray->o.y) * temp;
+				float tymax = (boundMax.y - ray->o.y) * temp;
+				if( tymin > tymax){
+					temp = tymin;
+					tymin = tymax;
+					tymax = temp;
+				}
+					
+				temp = 1.f / ray->d.z;
+				float tzmin = (boundMin.z - ray->o.z) * temp;
+				float tzmax = (boundMax.z - ray->o.z) * temp;
+				if( tzmin > tzmax){
+					temp = tzmin;
+					tzmin = tzmax;
+					tzmax = temp;
+				}
+					
+				float tmin = max(txmin, max(tymin, tzmin));
+				float tmax = min(txmax, max(tymax, tzmax));
+					
+				return (tmin < tmax);
+			}
+			
+			float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W){
+				float3 world;
+
+				world.x = U.x*localDirection.x + V.x*localDirection.y + W.x*localDirection.z;
+				world.y = U.y*localDirection.x + V.y*localDirection.y + W.y*localDirection.z;
+				world.z = U.z*localDirection.x + V.z*localDirection.y + W.z*localDirection.z;
+				return world;
+			}
+			
+			float4 intersect(Ray* ray, int shapeType, int numShapes, __global float4 *shapeData){
+				float t = INFINITY;
+				
+				int shapeIndex = -1;
+				unsigned int i = 0;
+				if(shapeType == 1){
+					for( i = 0; i < numShapes; i++){
+						//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+						//float t = 0;
+						Sphere* sphere;
+						sphere->c = shapeData[i].xyz;
+						sphere->r = shapeData[i].w;
+						float rv = raySphere(ray, sphere);
+						if ( rv < t ){
+							t = rv;
+							shapeIndex = i;
+						}
+					}
+				}
+				/*
+							if( t < INFINITY){
+								float epsilon = exp10(-2.f);
+								P = worldRay->o+epsilon + t*worldRay->d;
+								N = normalize(P-shapeData[shapeIndex].xyz);
+								
+								Ray* shadowRay;
+								shadowRay->o = P;
+								shadowRay->d = lightDirection;
+								if( dot(N, L) > 0){
+									for( i = 0; i < numShapes; i++){
+										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+										//float t = 0;	
+										Sphere* sphere;
+										sphere->c = shapeData[i].xyz;
+										sphere->r = shapeData[i].w;
+										float rv = raySphere(shadowRay, sphere);
+										if ( rv < INFINITY ){
+											shadow = true;
+											break;
+										}
+									}
+								}
+								else if(shapeType == 2){
+							for( i = 0; i < numShapes; i++){
+								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+								//float t = 0;	
+								float3 p0 = shapeData[shapeIndices[i].x].xyz;
+								float3 p1 = shapeData[shapeIndices[i].y].xyz;
+								float3 p2 = shapeData[shapeIndices[i].z].xyz;
+								float3 rv = rayTriangle(worldRay, p0, p1, p2);
+								if ( rv.x < t ){
+									t = rv.x;
+									alpha = rv.y;
+									beta = rv.z;
+									shapeIndex = i;
+								}
+							}
+							if( t < INFINITY){
+								float epsilon = 0;//exp10(-3.f);
+								P = worldRay->o+epsilon + t*worldRay->d;
+								float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
+								float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
+								float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
+								N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+								
+								Ray* shadowRay;
+								shadowRay->o = P;
+								shadowRay->d = lightDirection;
+								if( dot(N, L) >= 0){
+									for( i = 0; i < numShapes; i++){
+										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+										//float t = 0;	
+										if(shapeIndex != i){
+											float3 p0 = shapeData[shapeIndices[i].x].xyz;
+											float3 p1 = shapeData[shapeIndices[i].y].xyz;
+											float3 p2 = shapeData[shapeIndices[i].z].xyz;
+											float3 rv = rayTriangle(shadowRay, p0, p1, p2);
+											if ( rv.x < INFINITY ){
+												shadow = true;
+												break;
+											}
+										}
+									}
+								}
+							}
+						}
+							*/
+				
+				return t;
+			}
+			
 			__kernel void getPixelColor(
 				const int shapeType,
 				const int numShapes,
@@ -117,55 +263,39 @@ Assignment 1
 					float3 V = viewData[5].xyz;					
 					float3 W = viewData[6].xyz;
 					
-					float3 ray;
-					ray.x = width * ( (col+0.5f)/columns - 0.5f);
-					ray.y = height * (0.5f - (row+0.5f)/rows);
-					ray.z = -1.f;					
+					//float enableDiffuse = viewData[7].x;
+					//float enableSpecular = viewData[7].x;
+					//float enableShadows = viewData[7].x;
+					//float enableInterreflection = viewData[7].x;
 					
-					float3 transformedRay;
-					transformedRay.x = U.x*ray.x + V.x*ray.y + W.x*ray.z;
-					transformedRay.y = U.y*ray.x + V.y*ray.y + W.y*ray.z;
-					transformedRay.z = U.z*ray.x + V.z*ray.y + W.z*ray.z;
+					float3 localDirection;
+					localDirection.x = width * ( (col+0.5f)/columns - 0.5f);
+					localDirection.y = height * (0.5f - (row+0.5f)/rows);
+					localDirection.z = -1.f;					
 					
-					uchar4 color = (uchar4)(255, 255, 0, 255);
+					Ray* worldRay;
+					worldRay->o = eye;
+					worldRay->d = transformRayDirection(localDirection, U, V, W);
 					
-					float temp = 1.f / transformedRay.x;
-					float txmin = (boundMin.x - eye.x) * temp;
-					float txmax = (boundMax.x - eye.x) * temp;
-					if( txmin > txmax){
-						temp = txmin;
-						txmin = txmax;
-						txmax = temp;
-					}
+					debug[0] = (float4)(worldRay->o,0);
+					debug[1] = (float4)(worldRay->d,0);
+					debug[2] = (float4)(boundMin,0);
+					debug[3] = (float4)(boundMax,0);
 					
-					temp = 1.f / transformedRay.y;
-					float tymin = (boundMin.y - eye.y) * temp;
-					float tymax = (boundMax.y - eye.y) * temp;
-					if( tymin > tymax){
-						temp = tymin;
-						tymin = tymax;
-						tymax = temp;
-					}
+					uchar4 color = (uchar4)(0, 0, 0, 255);
 					
-					temp = 1.f / transformedRay.z;
-					float tzmin = (boundMin.z - eye.z) * temp;
-					float tzmax = (boundMax.z - eye.z) * temp;
-					if( tzmin > tzmax){
-						temp = tzmin;
-						tzmin = tzmax;
-						tzmax = temp;
-					}
+					if(boundingBoxIntersect(worldRay, boundMin, boundMax))
+						color = (uchar4)(255,0,0,255);
 					
-					float tmin = max(txmin, max(tymin, tzmin));
-					float tmax = min(txmax, max(tymax, tzmax));
-					if(tmax > tmin){
-					
+					if(false){//boundingBoxIntersect(worldRay, boundMin, boundMax)){
+	
 						bool shadow = false;
 						bool reflectedShadow = false;
 						float3 P;
 						float3 N;
 						float3 L = (float3)(1.f,1.f,0.f);
-						float3 View = normalize( -transformedRay);
+						float3 lightDirection = L;
+						//float3 View = normalize( -worldRay->d);
 						float3 R;
 						float alpha;
 						float beta;
@@ -180,49 +310,23 @@ Assignment 1
 						float4 reflectedDiffuse;
 						
 						float t = INFINITY;
-						int shapeIndex = -1;
-						unsigned int i = 0;
-						if(shapeType == 1){
-							for( i = 0; i < numShapes; i++){
-								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-								//float t = 0;
-								float rv = raySphere(eye, transformedRay, shapeData[i].xyz, shapeData[i].w);
-								if ( rv < t ){
-									t = rv;
-									shapeIndex = i;
-								}
-							}
-							if( t < INFINITY){
-								float epsilon = exp10(-2.f);
-								P = eye+epsilon + t*transformedRay;
-								N = normalize(P-shapeData[shapeIndex].xyz);
-								float3 Reflect = normalize( 2 * N * clamp(dot(normalize(-transformedRay), N), 0.0f, 1.f) + transformedRay);
-								if( dot(N, L) > 0){
-									for( i = 0; i < numShapes; i++){
-										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-										//float t = 0;	
-										float rv = raySphere(P, L, shapeData[i].xyz, shapeData[i].w);
-										if ( rv < INFINITY ){
-											shadow = true;
-											break;
-										}
-									}
-								}
 								/*
+								// TODO: Inter-reflection
 								if(true){
+									float3 reflectedRay = reflect(N, -transformedRay);
 									reflectedShadow = false;
 									float reflectedT = INFINITY;
 									for( i = 0; i < numShapes; i++){
 									//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
 									//float t = 0;
-									float rv = raySphere(P, Reflect, shapeData[i].xyz, shapeData[i].w);
+									float rv = raySphere(P, reflectedRay, shapeData[i].xyz, shapeData[i].w);
 									if ( rv < reflectedT ){
 										reflectedT = rv;
 										shapeIndex = i;
 									}
 									}
 									if( reflectedT < INFINITY){
-										float3 reflectedP = P+epsilon + reflectedT*Reflect;
+										float3 reflectedP = P+epsilon + reflectedT*reflectedRay;
 										float3 reflectedN = normalize(reflectedP-shapeData[shapeIndex].xyz);
 										if( dot(reflectedN, L) > 0){
 											for( i = 0; i < numShapes; i++){
@@ -237,7 +341,7 @@ Assignment 1
 										}
 										reflectedDiffuse = kd * clamp(dot(reflectedN, normalize(L)), 0.0f, 1.f);
 
-									
+									///*
 										if(reflectedShadow){
 											if(shadow){
 												diffuse = 0;
@@ -250,67 +354,30 @@ Assignment 1
 											reflectedDiffuse = kd * clamp(dot(reflectedN, normalize(L)), 0.0f, 1.f);
 											diffuse = (1.f-0.6f)*(kd * clamp(dot(N, normalize(L)), 0.0f, 1.f)) + 0.4f*reflectedDiffuse;
 										}
+									//
 									}
+									
 								}
 								*/
-							}
-						}
-						else if(shapeType == 2){
-							for( i = 0; i < numShapes; i++){
-								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-								//float t = 0;	
-								float3 p0 = shapeData[shapeIndices[i].x].xyz;
-								float3 p1 = shapeData[shapeIndices[i].y].xyz;
-								float3 p2 = shapeData[shapeIndices[i].z].xyz;
-								float3 rv = rayTriangle(eye, transformedRay, p0, p1, p2);
-								if ( rv.x < t ){
-									t = rv.x;
-									alpha = rv.y;
-									beta = rv.z;
-									shapeIndex = i;
-								}
-							}
-							if( t < INFINITY){
-								float epsilon = exp10(-4.f);
-								P = eye+epsilon + t*transformedRay;
-								float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
-								float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
-								float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
-								N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
-								if( dot(N, L) >= 0){
-									for( i = 0; i < numShapes; i++){
-										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-										//float t = 0;	
-										float3 p0 = shapeData[shapeIndices[i].x].xyz;
-										float3 p1 = shapeData[shapeIndices[i].y].xyz;
-										float3 p2 = shapeData[shapeIndices[i].z].xyz;
-										float3 rv = rayTriangle(P, L, p0, p1, p2);
-										if ( rv.x < INFINITY ){
-											shadow = true;
-											break;
-										}
-									}
-								}
-							}
-						}
-						if (t < INFINITY && shapeIndex >= 0){
-							if (shadow){// && reflectedShadow){							
-								color = (uchar4)(0, 0, 0, 255);								
-							}
-							else{
-								//if(shadow){
-								//	diffuse = 0.4f*reflectedDiffuse;
-								//}
-								//else if(reflectedShadow){
+						
+						if (t < INFINITY){// && shapeIndex >= 0){
+							//if (shadow){// && reflectedShadow){							
+							//	color = (uchar4)(0, 0, 0, 255);								
+							//}
+							//else{
+							//	if(shadow){
+							//		diffuse = 0.4f*reflectedDiffuse;
+							//	}
+							//	else if(true){
 									diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
-								//}
-								//else{
-								//	diffuse = (1.f-0.6f)*(kd * clamp(dot(N, normalize(L)), 0.0f, 1.f)) + 0.4f*reflectedDiffuse;
-								//}
+							//	}
+							//	else{
+							//		diffuse = (1.f-0.4f)*(kd * clamp(dot(N, normalize(L)), 0.0f, 1.f)) + 0.4f*reflectedDiffuse;
+							//	}
 								
-								R = normalize( 2 * N * clamp(dot(normalize(L), N), 0.0f, 1.f) - L);
+								R = reflect(N, L);
 									
-								float4 specular = ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+								float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
 								//TODO: Ambient Lighting
 								float4 ambient = 0;//ka * lightIntensity;
 								float4 Intensity = lightIntensity * (diffuse+specular+ambient);
@@ -321,7 +388,7 @@ Assignment 1
 								color = (uchar4)(red, green, blue, 255);
 							}
 						}				
-				}
+				
 					raster[row * columns + col] = color;
 				}
 		</script>
@@ -612,10 +679,10 @@ Assignment 1
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
-				//var debug = new Float32Array(sphereCenters.length);
-				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*sphereCenters.length, debug, []);
+				var debug = new Float32Array(4*20);
+				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*20, debug, []);
 				
-				//console.log(debug);
+				console.log(debug);
 					
 			}
 			

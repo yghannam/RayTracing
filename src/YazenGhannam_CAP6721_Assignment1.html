@@ -176,7 +176,7 @@ Assignment 1
 								shapeIndex = i;
 							}
 						}
-						float epsilon = exp10(-2.f);
+						float epsilon = exp10(-4.f);
 						P = eye+epsilon + t*transformedRay;
 						float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
 						float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
@@ -242,6 +242,8 @@ Assignment 1
 			var camera = new Object();
 			var rotate = false;
 			var sceneLoaded = false;
+			var localWS = null;
+			var globalWS = null;
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -351,7 +353,7 @@ Assignment 1
 			
 				var startTime = new Date().getTime();
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
-				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
 				var endTime = new Date().getTime();
 				console.log("Compute time: "+(endTime-startTime));	
@@ -473,13 +475,22 @@ Assignment 1
 				clKernels.colorKernel.setKernelArg(5, clBuffers.shapeIndicesBuffer);
 				clKernels.colorKernel.setKernelArg(6, clBuffers.rasterBuffer);
 				clKernels.colorKernel.setKernelArg(7, clBuffers.debugBuffer);
+				//console.log(device);
+				wsSize = clKernels.colorKernel.getKernelWorkGroupInfo(device, WebCL.CL_KERNEL_WORK_GROUP_SIZE);
+				xSize = Math.floor(Math.sqrt(wsSize)); 
+				ySize = Math.floor(wsSize/xSize);
+				localWS = [xSize,ySize];
+				globalWS = [
+					Math.ceil (canvas.width / localWS[0]) * localWS[0], 
+					Math.ceil (canvas.height / localWS[1]) * localWS[1]
+				];
 				
 				var startTime = new Date().getTime();
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeNormalsBuffer, true, 0, 4*shapeNormals.length, new Float32Array(shapeNormals), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
-				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
 				console.log("Compute time: "+(new Date().getTime()-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
@@ -571,6 +582,7 @@ Assignment 1
 					}
 					//console.log(platforms);
 					//console.log(devices);
+					device = devices[0][0];
 					clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
 					clCQ = clCtx.createCommandQueue(devices[0][0], 0);
 					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
@@ -608,7 +620,7 @@ Assignment 1
 		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
 		<br>
 		<div style="float:left">
-			<canvas id="myCanvas" width="1024" height="720"></canvas>
+			<canvas id="myCanvas" width="640" height="480"></canvas>
 		</div>
 		<div style="float:left">
 			<p>Camera Controls</p>

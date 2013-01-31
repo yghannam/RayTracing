@@ -123,10 +123,11 @@ Assignment 1
 					transformedRay.y = U.y*ray.x + V.y*ray.y + W.y*ray.z;
 					transformedRay.z = U.z*ray.x + V.z*ray.y + W.z*ray.z;
 					
-					uchar4 color = (uchar4)(0, 0, 0, 255);
+					uchar4 color = (uchar4)(255, 255, 0, 255);
+					bool shadow = false;
 					float3 P;
 					float3 N;
-					float3 L = normalize((float3)(1.f,1.f,1.f));
+					float3 L = (float3)(1.f,1.f,0.f);
 					float3 View = normalize( -transformedRay);
 					float3 R;
 					float alpha;
@@ -145,7 +146,20 @@ Assignment 1
 								shapeIndex = i;
 							}
 						}
-						
+						float epsilon = exp10(-2.f);
+						P = eye+epsilon + t*transformedRay;
+						N = normalize(P-shapeData[shapeIndex].xyz);
+						if( dot(N, L) > 0){
+							for( i = 0; i < numShapes; i++){
+								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+								//float t = 0;	
+								float rv = raySphere(P, L, shapeData[i].xyz, shapeData[i].w);
+								if ( rv < INFINITY ){
+									shadow = true;
+									break;
+								}
+							}
+						}
 					}
 					else if(shapeType == 2){
 						for( i = 0; i < numShapes; i++){
@@ -162,34 +176,51 @@ Assignment 1
 								shapeIndex = i;
 							}
 						}
+						float epsilon = exp10(-2.f);
+						P = eye+epsilon + t*transformedRay;
+						float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
+						float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
+						float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
+						N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+						if( dot(N, L) >= 0){
+							for( i = 0; i < numShapes; i++){
+								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+								//float t = 0;	
+								float3 p0 = shapeData[shapeIndices[i].x].xyz;
+								float3 p1 = shapeData[shapeIndices[i].y].xyz;
+								float3 p2 = shapeData[shapeIndices[i].z].xyz;
+								float3 rv = rayTriangle(P, L, p0, p1, p2);
+								if ( rv.x < INFINITY ){
+									shadow = true;
+									break;
+								}
+							}
+						}
 					}
 					if (t < INFINITY && shapeIndex >= 0){
-						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
-						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
-						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
-						float shininess = 10;
-						
-						P = eye + t*transformedRay;
-						if (shapeType == 1){
-							N = normalize(P-shapeData[shapeIndex].xyz);
+						if (shadow){
+							color = (uchar4)(0, 0, 0, 255);
 						}
-						else if (shapeType == 2){
-							float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
-							float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
-							float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
-							N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+						else{
+							float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
+							float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+							float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
+							float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
+							float shininess = 10;
+							
+							R = normalize( 2 * N * clamp(dot(normalize(L), N), 0.0f, 1.f) - L);
+							float4 diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
+							float4 specular = ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+							//TODO: Ambient Lighting
+							float4 ambient = 0;//ka * lightIntensity;
+							float4 Intensity = lightIntensity * (diffuse+specular+ambient);
+							
+							uchar red = (uchar) round(255*Intensity.x);
+							uchar green = (uchar) round(255*Intensity.y);
+							uchar blue = (uchar) round(255*Intensity.z);
+							color = (uchar4)(red, green, blue, 255);
 						}
-						R = normalize( 2 * N * clamp(dot(L, N), 0.0f, 1.f) - L);
-						float4 diffuse = kd * clamp(dot(N, L), 0.0f, 1.f);
-						float4 specular = ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
-						float4 Intensity = lightIntensity * (diffuse+specular);
-						
-						uchar red = (uchar) round(255*Intensity.x);
-						uchar green = (uchar) round(255*Intensity.y);
-						uchar blue = (uchar) round(255*Intensity.z);
-						color = (uchar4)(red, green, blue, 255);
 					}					
-					
 					raster[row * columns + col] = color;
 				}
 		</script>
@@ -322,7 +353,8 @@ Assignment 1
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, 2, [], [canvas.width, canvas.height], [], []);
 				clCQ.finish();
-				console.log("Compute time: "+(new Date().getTime()-startTime));	
+				var endTime = new Date().getTime();
+				console.log("Compute time: "+(endTime-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 			}
@@ -576,7 +608,7 @@ Assignment 1
 		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
 		<br>
 		<div style="float:left">
-			<canvas id="myCanvas" width="320" height="240"></canvas>
+			<canvas id="myCanvas" width="1024" height="720"></canvas>
 		</div>
 		<div style="float:left">
 			<p>Camera Controls</p>

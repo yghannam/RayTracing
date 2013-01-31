@@ -20,19 +20,19 @@ Assignment 1
 			}Sphere;
 			
 			float rayPlane(
-				Ray *ray, 
+				Ray ray, 
 				float3 normal,
 				float3 point){
 					float t = INFINITY;					
-					float rayNormal = dot(ray->d, normal);
+					float rayNormal = dot(ray.d, normal);
 					if( rayNormal != 0){
-						t = dot(point-ray->o, normal)/rayNormal;
+						t = dot(point-ray.o, normal)/rayNormal;
 					}					
 					return (t>0) ? t : INFINITY;
 				}
 				
 			float3 rayTriangle(
-				Ray* ray, 
+				Ray ray, 
 				float3 p0,
 				float3 p1,
 				float3 p2){
@@ -54,11 +54,11 @@ Assignment 1
 				*/
 				float3 e1 = p1-p0;
 				float3 e2 = p2-p0;
-				float3 s = ray->o-p0;
-				float invDet = 1.0f / dot(cross(ray->d, e2), e1);
+				float3 s = ray.o-p0;
+				float invDet = 1.0f / dot(cross(ray.d, e2), e1);
 				t = invDet * dot(cross(s, e1), e2);
-				float alpha = invDet * dot(cross(ray->d, e2), s);
-				float beta = invDet * dot(cross(s, e1), ray->d);
+				float alpha = invDet * dot(cross(ray.d, e2), s);
+				float beta = invDet * dot(cross(s, e1), ray.d);
 				
 				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
 					t = INFINITY;
@@ -67,12 +67,12 @@ Assignment 1
 				return (float3)(t, alpha, beta);
 			}
 			float raySphere(
-				Ray* ray, 
-				Sphere* sphere){
+				Ray ray, 
+				Sphere sphere){
 				float t = INFINITY;
-				float a = dot(ray->d, ray->d);
-				float b = 2.0f * dot(ray->o - sphere->c ,ray->d);
-				float c = dot(ray->o-sphere->c,ray->o-sphere->c) - sphere->r*sphere->r;
+				float a = dot(ray.d, ray.d);
+				float b = 2.0f * dot(ray.o - sphere.c ,ray.d);
+				float c = dot(ray.o-sphere.c,ray.o-sphere.c) - sphere.r*sphere.r;
 				float discriminant = b*b - 4.0f*a*c;
 				if (discriminant == 0){
 					t = -b/(2.0f*a);
@@ -104,28 +104,28 @@ Assignment 1
 			
 			}
 			
-			bool boundingBoxIntersect(Ray* ray, float3 boundMin, float3 boundMax){
-				float temp = 1.f / ray->d.x;
-				float txmin = (boundMin.x - ray->o.x) * temp;
-				float txmax = (boundMax.x - ray->o.x) * temp;
+			bool boundingBoxIntersect(Ray ray, float3 boundMin, float3 boundMax){
+				float temp = 1.f / ray.d.x;
+				float txmin = (boundMin.x - ray.o.x) * temp;
+				float txmax = (boundMax.x - ray.o.x) * temp;
 				if( txmin > txmax){
 					temp = txmin;
 					txmin = txmax;
 					txmax = temp;
 				}
 					
-				temp = 1.f / ray->d.y;
-				float tymin = (boundMin.y - ray->o.y) * temp;
-				float tymax = (boundMax.y - ray->o.y) * temp;
+				temp = 1.f / ray.d.y;
+				float tymin = (boundMin.y - ray.o.y) * temp;
+				float tymax = (boundMax.y - ray.o.y) * temp;
 				if( tymin > tymax){
 					temp = tymin;
 					tymin = tymax;
 					tymax = temp;
 				}
 					
-				temp = 1.f / ray->d.z;
-				float tzmin = (boundMin.z - ray->o.z) * temp;
-				float tzmax = (boundMax.z - ray->o.z) * temp;
+				temp = 1.f / ray.d.z;
+				float tzmin = (boundMin.z - ray.o.z) * temp;
+				float tzmax = (boundMax.z - ray.o.z) * temp;
 				if( tzmin > tzmax){
 					temp = tzmin;
 					tzmin = tzmax;
@@ -147,18 +147,16 @@ Assignment 1
 				return world;
 			}
 			
-			float4 intersect(Ray* ray, int shapeType, int numShapes, __global float4 *shapeData){
+			float2 intersect(Ray ray, int shapeType, int numShapes, __global float4 *shapeData){
 				float t = INFINITY;
 				
 				int shapeIndex = -1;
 				unsigned int i = 0;
 				if(shapeType == 1){
 					for( i = 0; i < numShapes; i++){
-						//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-						//float t = 0;
-						Sphere* sphere;
-						sphere->c = shapeData[i].xyz;
-						sphere->r = shapeData[i].w;
+						Sphere sphere;
+						sphere.c = shapeData[i].xyz;
+						sphere.r = shapeData[i].w;
 						float rv = raySphere(ray, sphere);
 						if ( rv < t ){
 							t = rv;
@@ -235,7 +233,7 @@ Assignment 1
 						}
 							*/
 				
-				return t;
+				return (float2)(t,shapeIndex);
 			}
 			
 			__kernel void getPixelColor(
@@ -273,21 +271,20 @@ Assignment 1
 					localDirection.y = height * (0.5f - (row+0.5f)/rows);
 					localDirection.z = -1.f;					
 					
-					Ray* worldRay;
-					worldRay->o = eye;
-					worldRay->d = transformRayDirection(localDirection, U, V, W);
+					Ray worldRay;
+					worldRay.o = eye;
+					worldRay.d = transformRayDirection(localDirection, U, V, W);
 					
-					debug[0] = (float4)(worldRay->o,0);
-					debug[1] = (float4)(worldRay->d,0);
-					debug[2] = (float4)(boundMin,0);
-					debug[3] = (float4)(boundMax,0);
+					//for(int i = 0; i < 4; i++)
+					//	debug[i] = (float4)(0,0,0,0);
+					//debug[0] = (float4)(viewData[3]);
+					//debug[1] = (float4)(eye,0);
+					//debug[2] = (float4)(worldRay.o,0);
+					//debug[3] = (float4)(boundMax,0);
 					
 					uchar4 color = (uchar4)(0, 0, 0, 255);
 					
-					if(boundingBoxIntersect(worldRay, boundMin, boundMax))
-						color = (uchar4)(255,0,0,255);
-					
-					if(false){//boundingBoxIntersect(worldRay, boundMin, boundMax)){
+					if(boundingBoxIntersect(worldRay, boundMin, boundMax)){
 	
 						bool shadow = false;
 						bool reflectedShadow = false;
@@ -309,7 +306,11 @@ Assignment 1
 						float4 diffuse;
 						float4 reflectedDiffuse;
 						
-						float t = INFINITY;
+						float2 rv = intersect(worldRay, shapeType, numShapes, shapeData);
+						float t = rv.x;
+						int shapeIndex = (int)rv.y;
+						P = worldRay.o + t*worldRay.d;
+						N = normalize(P - shapeData[shapeIndex].xyz);
 								/*
 								// TODO: Inter-reflection
 								if(true){
@@ -360,35 +361,23 @@ Assignment 1
 								}
 								*/
 						
-						if (t < INFINITY){// && shapeIndex >= 0){
-							//if (shadow){// && reflectedShadow){							
-							//	color = (uchar4)(0, 0, 0, 255);								
-							//}
-							//else{
-							//	if(shadow){
-							//		diffuse = 0.4f*reflectedDiffuse;
-							//	}
-							//	else if(true){
-									diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
-							//	}
-							//	else{
-							//		diffuse = (1.f-0.4f)*(kd * clamp(dot(N, normalize(L)), 0.0f, 1.f)) + 0.4f*reflectedDiffuse;
-							//	}
+						if (t < INFINITY){
+							
+							diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
+							
+							R = reflect(N, L);
 								
-								R = reflect(N, L);
+							float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+							//TODO: Ambient Lighting
+							float4 ambient = 0;//ka * lightIntensity;
+							float4 Intensity = lightIntensity * (diffuse+specular+ambient);
 									
-								float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
-								//TODO: Ambient Lighting
-								float4 ambient = 0;//ka * lightIntensity;
-								float4 Intensity = lightIntensity * (diffuse+specular+ambient);
-									
-								uchar red = (uchar) round(255*Intensity.x);
-								uchar green = (uchar) round(255*Intensity.y);
-								uchar blue = (uchar) round(255*Intensity.z);
-								color = (uchar4)(red, green, blue, 255);
-							}
-						}				
-				
+							uchar red = (uchar) round(255*Intensity.x);
+							uchar green = (uchar) round(255*Intensity.y);
+							uchar blue = (uchar) round(255*Intensity.z);
+							color = (uchar4)(red, green, blue, 255);
+						}
+					}				
 					raster[row * columns + col] = color;
 				}
 		</script>
@@ -679,8 +668,8 @@ Assignment 1
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
-				var debug = new Float32Array(4*20);
-				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*20, debug, []);
+				var debug = new Float32Array(16);
+				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);
 				
 				console.log(debug);
 					

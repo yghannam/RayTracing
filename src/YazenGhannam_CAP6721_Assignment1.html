@@ -19,6 +19,13 @@ Assignment 1
 				float r;
 			}Sphere;
 			
+			typedef struct{
+				float t;
+				int shapeIndex;
+				float3 P;
+				float3 N;
+			}Intersection;
+			
 			float rayPlane(
 				Ray ray, 
 				float3 normal,
@@ -147,10 +154,18 @@ Assignment 1
 				return world;
 			}
 			
-			float2 intersect(Ray ray, int shapeType, int numShapes, __global float4 *shapeData){
-				float t = INFINITY;
+			float2 intersect(
+				Ray ray, 
+				bool isShadowRay, 
+				int shapeType, 
+				int numShapes, 
+				__global float4 *shapeData, 
+				__global uint4 *shapeIndices){
 				
-				int shapeIndex = -1;
+				Intersection intersection;
+				intersection.t = INFINITY;
+				
+				intersection.shapeIndex = -1;
 				unsigned int i = 0;
 				if(shapeType == 1){
 					for( i = 0; i < numShapes; i++){
@@ -158,9 +173,28 @@ Assignment 1
 						sphere.c = shapeData[i].xyz;
 						sphere.r = shapeData[i].w;
 						float rv = raySphere(ray, sphere);
-						if ( rv < t ){
-							t = rv;
-							shapeIndex = i;
+						if ( rv < intersection.t ){
+							intersection.t = rv;
+							intersection.shapeIndex = i;
+							
+							if(isShadowRay){
+								break;
+							}
+						}
+					}
+				}
+				else if(shapeType == 2){
+					float alpha, beta;
+					for( i = 0; i < numShapes; i++){
+						float3 p0 = shapeData[shapeIndices[i].x].xyz;
+						float3 p1 = shapeData[shapeIndices[i].y].xyz;
+						float3 p2 = shapeData[shapeIndices[i].z].xyz;
+						float3 rv = rayTriangle(ray, p0, p1, p2);
+						if ( rv.x < intersection.t ){
+							intersection.t = rv.x;
+							alpha = rv.y;
+							beta = rv.z;
+							intersection.shapeIndex = i;
 						}
 					}
 				}
@@ -187,21 +221,7 @@ Assignment 1
 										}
 									}
 								}
-								else if(shapeType == 2){
-							for( i = 0; i < numShapes; i++){
-								//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
-								//float t = 0;	
-								float3 p0 = shapeData[shapeIndices[i].x].xyz;
-								float3 p1 = shapeData[shapeIndices[i].y].xyz;
-								float3 p2 = shapeData[shapeIndices[i].z].xyz;
-								float3 rv = rayTriangle(worldRay, p0, p1, p2);
-								if ( rv.x < t ){
-									t = rv.x;
-									alpha = rv.y;
-									beta = rv.z;
-									shapeIndex = i;
-								}
-							}
+								
 							if( t < INFINITY){
 								float epsilon = 0;//exp10(-3.f);
 								P = worldRay->o+epsilon + t*worldRay->d;
@@ -233,7 +253,7 @@ Assignment 1
 						}
 							*/
 				
-				return (float2)(t,shapeIndex);
+				return (float2)(intersection.t,intersection.shapeIndex);
 			}
 			
 			__kernel void getPixelColor(
@@ -292,7 +312,7 @@ Assignment 1
 						float3 N;
 						float3 L = (float3)(1.f,1.f,0.f);
 						float3 lightDirection = L;
-						//float3 View = normalize( -worldRay->d);
+						float3 View = normalize( -worldRay.d);
 						float3 R;
 						float alpha;
 						float beta;
@@ -306,7 +326,7 @@ Assignment 1
 						float4 diffuse;
 						float4 reflectedDiffuse;
 						
-						float2 rv = intersect(worldRay, shapeType, numShapes, shapeData);
+						float2 rv = intersect(worldRay, false, shapeType, numShapes, shapeData, shapeIndices);
 						float t = rv.x;
 						int shapeIndex = (int)rv.y;
 						P = worldRay.o + t*worldRay.d;
@@ -668,10 +688,10 @@ Assignment 1
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
-				var debug = new Float32Array(16);
-				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);
 				
-				console.log(debug);
+				//var debug = new Float32Array(16);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
+				//console.log(debug);
 					
 			}
 			

@@ -1,0 +1,823 @@
+<!--
+Author: Yazen Ghannam
+Spring 2013
+CAP 6721
+Assignment 1
+-->
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+		<meta content="utf-8" http-equiv="encoding">
+		<script id="openclProgram" type="text/x-opencl">
+			typedef struct {
+				float3 d, o;
+			}Ray;
+			
+			typedef struct{
+				float3 c;
+				float r;
+			}Sphere;
+			
+			typedef struct{
+				float t;
+				int shapeIndex;
+				float3 P;
+				float3 N;
+			}Intersection;
+			
+			float rayPlane(
+				Ray ray, 
+				float3 normal,
+				float3 point){
+					float t = INFINITY;					
+					float rayNormal = dot(ray.d, normal);
+					if( rayNormal != 0){
+						t = dot(point-ray.o, normal)/rayNormal;
+					}					
+					return (t>0) ? t : INFINITY;
+				}
+				
+			float3 rayTriangle(
+				Ray ray, 
+				float3 p0,
+				float3 p1,
+				float3 p2){
+				float t = INFINITY;
+				
+				/*
+				float3 normal = cross(p1-p0, p2-p0);
+				t = rayPlane(rayOrigin, rayDirection, normal, p0);
+				if(t > 0){
+					float3 p = rayOrigin + t*rayDirection;
+					float normalSquared = dot(normal, normal);
+					float alpha = dot(normal, cross(p-p0, p2-p0))/normalSquared;
+					float beta = dot(normal, cross(p1-p0, p-p0))/normalSquared;
+					
+					if(alpha < 0 || beta < 0 || alpha+beta > 1){
+						t = 0;
+					}
+				}
+				*/
+				float3 e1 = p1-p0;
+				float3 e2 = p2-p0;
+				float3 s = ray.o-p0;
+				float invDet = 1.0f / dot(cross(ray.d, e2), e1);
+				t = invDet * dot(cross(s, e1), e2);
+				float alpha = invDet * dot(cross(ray.d, e2), s);
+				float beta = invDet * dot(cross(s, e1), ray.d);
+				
+				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
+					t = INFINITY;
+				}
+				
+				return (float3)(t, alpha, beta);
+			}
+			float raySphere(
+				Ray ray, 
+				Sphere sphere){
+				float t = INFINITY;
+				float a = dot(ray.d, ray.d);
+				float b = 2.0f * dot(ray.o - sphere.c ,ray.d);
+				float c = dot(ray.o-sphere.c,ray.o-sphere.c) - sphere.r*sphere.r;
+				float discriminant = b*b - 4.0f*a*c;
+				if (discriminant == 0){
+					t = -b/(2.0f*a);
+				}
+				else{
+					float root = sqrt(discriminant);
+					float q = (b < 0) ? (-0.5f*(b-root)) : (-0.5f*(b+root));
+					float x1 = q/a;
+					float x2 = c/q;
+					if(x1 > 0 && x2 > 0){
+						t = (x1 < x2) ? x1:x2;
+					}
+					else if (x1 > 0 && x2 <= 0){
+						t = x1;
+					}
+					else if (x1 <= 0 && x2 > 0){
+						t = x2;
+					}
+					else{
+						t = INFINITY;
+					}
+				}
+				return t;
+			}
+			
+			float3 reflect(float3 normal, float3 incident){
+			
+				return normalize( 2 * normal * clamp(dot(normalize(incident), normal), 0.0f, 1.f) - incident);
+			
+			}
+			
+			bool boundingBoxIntersect(Ray ray, float3 boundMin, float3 boundMax){
+				float temp = 1.f / ray.d.x;
+				float txmin = (boundMin.x - ray.o.x) * temp;
+				float txmax = (boundMax.x - ray.o.x) * temp;
+				if( txmin > txmax){
+					temp = txmin;
+					txmin = txmax;
+					txmax = temp;
+				}
+					
+				temp = 1.f / ray.d.y;
+				float tymin = (boundMin.y - ray.o.y) * temp;
+				float tymax = (boundMax.y - ray.o.y) * temp;
+				if( tymin > tymax){
+					temp = tymin;
+					tymin = tymax;
+					tymax = temp;
+				}
+					
+				temp = 1.f / ray.d.z;
+				float tzmin = (boundMin.z - ray.o.z) * temp;
+				float tzmax = (boundMax.z - ray.o.z) * temp;
+				if( tzmin > tzmax){
+					temp = tzmin;
+					tzmin = tzmax;
+					tzmax = temp;
+				}
+					
+				float tmin = max(txmin, max(tymin, tzmin));
+				float tmax = min(txmax, max(tymax, tzmax));
+					
+				return (tmin < tmax);
+			}
+			
+			float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W){
+				float3 world;
+
+				world.x = U.x*localDirection.x + V.x*localDirection.y + W.x*localDirection.z;
+				world.y = U.y*localDirection.x + V.y*localDirection.y + W.y*localDirection.z;
+				world.z = U.z*localDirection.x + V.z*localDirection.y + W.z*localDirection.z;
+				return world;
+			}
+			
+			float2 intersect(
+				Ray ray, 
+				bool isShadowRay, 
+				int shapeType, 
+				int numShapes, 
+				__global float4 *shapeData, 
+				__global uint4 *shapeIndices){
+				
+				Intersection intersection;
+				intersection.t = INFINITY;
+				
+				intersection.shapeIndex = -1;
+				unsigned int i = 0;
+				if(shapeType == 1){
+					for( i = 0; i < numShapes; i++){
+						Sphere sphere;
+						sphere.c = shapeData[i].xyz;
+						sphere.r = shapeData[i].w;
+						float rv = raySphere(ray, sphere);
+						if ( rv < intersection.t ){
+							intersection.t = rv;
+							intersection.shapeIndex = i;
+							
+							if(isShadowRay){
+								break;
+							}
+						}
+					}
+				}
+				else if(shapeType == 2){
+					float alpha, beta;
+					for( i = 0; i < numShapes; i++){
+						float3 p0 = shapeData[shapeIndices[i].x].xyz;
+						float3 p1 = shapeData[shapeIndices[i].y].xyz;
+						float3 p2 = shapeData[shapeIndices[i].z].xyz;
+						float3 rv = rayTriangle(ray, p0, p1, p2);
+						if ( rv.x < intersection.t ){
+							intersection.t = rv.x;
+							alpha = rv.y;
+							beta = rv.z;
+							intersection.shapeIndex = i;
+						}
+					}
+				}
+				/*
+							if( t < INFINITY){
+								float epsilon = exp10(-2.f);
+								P = worldRay->o+epsilon + t*worldRay->d;
+								N = normalize(P-shapeData[shapeIndex].xyz);
+								
+								Ray* shadowRay;
+								shadowRay->o = P;
+								shadowRay->d = lightDirection;
+								if( dot(N, L) > 0){
+									for( i = 0; i < numShapes; i++){
+										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+										//float t = 0;	
+										Sphere* sphere;
+										sphere->c = shapeData[i].xyz;
+										sphere->r = shapeData[i].w;
+										float rv = raySphere(shadowRay, sphere);
+										if ( rv < INFINITY ){
+											shadow = true;
+											break;
+										}
+									}
+								}
+								
+							if( t < INFINITY){
+								float epsilon = 0;//exp10(-3.f);
+								P = worldRay->o+epsilon + t*worldRay->d;
+								float3 n0 = shapeNormals[shapeIndices[shapeIndex].x].xyz;
+								float3 n1 = shapeNormals[shapeIndices[shapeIndex].y].xyz;
+								float3 n2 = shapeNormals[shapeIndices[shapeIndex].z].xyz;
+								N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+								
+								Ray* shadowRay;
+								shadowRay->o = P;
+								shadowRay->d = lightDirection;
+								if( dot(N, L) >= 0){
+									for( i = 0; i < numShapes; i++){
+										//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+										//float t = 0;	
+										if(shapeIndex != i){
+											float3 p0 = shapeData[shapeIndices[i].x].xyz;
+											float3 p1 = shapeData[shapeIndices[i].y].xyz;
+											float3 p2 = shapeData[shapeIndices[i].z].xyz;
+											float3 rv = rayTriangle(shadowRay, p0, p1, p2);
+											if ( rv.x < INFINITY ){
+												shadow = true;
+												break;
+											}
+										}
+									}
+								}
+							}
+						}
+							*/
+				
+				return (float2)(intersection.t,intersection.shapeIndex);
+			}
+			
+			__kernel void getPixelColor(
+				const int shapeType,
+				const int numShapes,
+				__global float4 *viewData,
+				__global float4 *shapeData,
+				__global float4 *shapeNormals,
+				__global uint4 *shapeIndices,
+				__global uchar4 *raster,
+				__global float4 *debug){
+					const int col = get_global_id(0);
+					const int row = get_global_id(1);
+					
+					const int columns = (int) viewData[0].x;
+					const int rows = (int) viewData[0].y;
+					const float width = viewData[0].z;
+					const float height = viewData[0].w;
+					
+					float3 boundMin = viewData[1].xyz;
+					float3 boundMax = viewData[2].xyz;
+					
+					float3 eye = viewData[3].xyz;
+					float3 U = viewData[4].xyz;
+					float3 V = viewData[5].xyz;					
+					float3 W = viewData[6].xyz;
+					
+					//float enableDiffuse = viewData[7].x;
+					//float enableSpecular = viewData[7].x;
+					//float enableShadows = viewData[7].x;
+					//float enableInterreflection = viewData[7].x;
+					
+					float3 localDirection;
+					localDirection.x = width * ( (col+0.5f)/columns - 0.5f);
+					localDirection.y = height * (0.5f - (row+0.5f)/rows);
+					localDirection.z = -1.f;					
+					
+					Ray worldRay;
+					worldRay.o = eye;
+					worldRay.d = transformRayDirection(localDirection, U, V, W);
+					
+					//for(int i = 0; i < 4; i++)
+					//	debug[i] = (float4)(0,0,0,0);
+					//debug[0] = (float4)(viewData[3]);
+					//debug[1] = (float4)(eye,0);
+					//debug[2] = (float4)(worldRay.o,0);
+					//debug[3] = (float4)(boundMax,0);
+					
+					uchar4 color = (uchar4)(0, 0, 0, 255);
+					
+					if(boundingBoxIntersect(worldRay, boundMin, boundMax)){
+	
+						bool shadow = false;
+						bool reflectedShadow = false;
+						float3 P;
+						float3 N;
+						float3 L = (float3)(1.f,1.f,0.f);
+						float3 lightDirection = L;
+						float3 View = normalize( -worldRay.d);
+						float3 R;
+						float alpha;
+						float beta;
+						
+						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
+						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
+						float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
+						float shininess = 10;
+						
+						float4 diffuse;
+						float4 reflectedDiffuse;
+						
+						float2 rv = intersect(worldRay, false, shapeType, numShapes, shapeData, shapeIndices);
+						float t = rv.x;
+						int shapeIndex = (int)rv.y;
+						P = worldRay.o + t*worldRay.d;
+						N = normalize(P - shapeData[shapeIndex].xyz);
+								/*
+								// TODO: Inter-reflection
+								if(true){
+									float3 reflectedRay = reflect(N, -transformedRay);
+									reflectedShadow = false;
+									float reflectedT = INFINITY;
+									for( i = 0; i < numShapes; i++){
+									//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+									//float t = 0;
+									float rv = raySphere(P, reflectedRay, shapeData[i].xyz, shapeData[i].w);
+									if ( rv < reflectedT ){
+										reflectedT = rv;
+										shapeIndex = i;
+									}
+									}
+									if( reflectedT < INFINITY){
+										float3 reflectedP = P+epsilon + reflectedT*reflectedRay;
+										float3 reflectedN = normalize(reflectedP-shapeData[shapeIndex].xyz);
+										if( dot(reflectedN, L) > 0){
+											for( i = 0; i < numShapes; i++){
+												//debug[i] = sphereCenters[i];//(float3)(50,1000,27);
+												//float t = 0;	
+												float rv = raySphere(reflectedP, L, shapeData[i].xyz, shapeData[i].w);
+												if ( rv < INFINITY ){
+													reflectedShadow = true;
+													break;
+												}
+											}
+										}
+										reflectedDiffuse = kd * clamp(dot(reflectedN, normalize(L)), 0.0f, 1.f);
+
+									///*
+										if(reflectedShadow){
+											if(shadow){
+												diffuse = 0;
+											}
+											else{
+												diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
+											}
+										}
+										else{
+											reflectedDiffuse = kd * clamp(dot(reflectedN, normalize(L)), 0.0f, 1.f);
+											diffuse = (1.f-0.6f)*(kd * clamp(dot(N, normalize(L)), 0.0f, 1.f)) + 0.4f*reflectedDiffuse;
+										}
+									//
+									}
+									
+								}
+								*/
+						
+						if (t < INFINITY){
+							
+							diffuse = kd * clamp(dot(N, normalize(L)), 0.0f, 1.f);
+							
+							R = reflect(N, L);
+								
+							float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+							//TODO: Ambient Lighting
+							float4 ambient = 0;//ka * lightIntensity;
+							float4 Intensity = lightIntensity * (diffuse+specular+ambient);
+									
+							uchar red = (uchar) round(255*Intensity.x);
+							uchar green = (uchar) round(255*Intensity.y);
+							uchar blue = (uchar) round(255*Intensity.z);
+							color = (uchar4)(red, green, blue, 255);
+						}
+					}				
+					raster[row * columns + col] = color;
+				}
+		</script>
+		<script type="text/javascript">
+			var model = null;
+			var platforms = null;
+			var devices = [];
+			var canvas = null;
+			var canvasCtx = null;
+			var raster = null;
+			var rv = null;
+			var device = null;
+			var clCtx = null;
+			var clCQ = null;
+			var clProgram = null;
+			var clKernels = new Object();
+			var clBuffers = new Object();
+			var viewDimensions = null;
+			var camera = new Object();
+			var rotate = false;
+			var sceneLoaded = false;
+			var localWS = null;
+			var globalWS = null;
+			
+			function parseJSON(jsonFile){
+				var xhttp = new XMLHttpRequest();
+				xhttp.open("GET", jsonFile, false);				
+				xhttp.overrideMimeType("application/json");
+				xhttp.send(null);
+				//console.log(jsonFile);
+				//console.log(xhttp);
+				return JSON.parse(xhttp.responseText);
+			}
+			
+			function loadFile(){
+				model = parseJSON(document.getElementById("inputFile").value);
+				//console.log(model);
+				loadScene();
+			}
+			
+			function padArray(array, currentSize){
+				var paddedArray = new Array();
+				var j = 0;
+				for(var i = 0; i < array.length; i++, j++){
+					if(i > 0 && i % currentSize == 0){
+						paddedArray[j++] = 0;
+						//paddedArray[++j] = array[i];
+					}
+					paddedArray[j] = array[i];
+				}
+				paddedArray[j] = 0;
+				return paddedArray;
+			}
+			
+			function vecLength(array){
+				var total = 0;
+				for(x in array){
+					total += array[x]*array[x];
+				}
+				return Math.sqrt(total);
+			}
+			
+			function normalize(array){
+				var length = vecLength(array);
+				for(x in array){
+					array[x] /= length;
+				}
+				return array;
+			}
+			
+			function cross(a, b){
+				if(a.length != b.length || a.length != 3)
+					throw "cross: vectors must be length 3.";
+				var c = new Array();
+				c[0] = a[1]*b[2] - a[2]*b[1];
+				c[1] = -(a[0]*b[2] - a[2]*b[0]);
+				c[2] = a[0]*b[1] - a[1]*b[0];
+				
+				return c;
+			}
+			
+			function addVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]+b[x];
+				}
+				
+				return c;
+			}
+			
+			function subtractVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]-b[x];
+				}				
+				return c;
+			}
+			
+			function divideVec(a, num){				
+				for (x in a){
+					a[x] /= num;
+				}				
+				return a;
+			}
+			
+			function updateRotate(){
+				rotate = !rotate;
+			}
+			
+			function updateCamera(){
+				camera.phi += Math.PI/90;
+				//camera.theta += Math.PI/360;
+				camera.eye[0] = camera.radius * Math.sin(camera.theta) * Math.cos(camera.phi);
+				camera.eye[1] = camera.radius * Math.cos(camera.theta);
+				camera.eye[2] = camera.radius * Math.sin(camera.theta) * Math.sin(camera.phi);//[boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var viewData = viewDimensions.concat(cameraData);
+			
+				//console.log(cameraData);
+			
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
+				clCQ.finish();
+				var endTime = new Date().getTime();
+				console.log("Compute time: "+(endTime-startTime));	
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+			}
+			
+			function loadScene(){
+				
+				var shapeType = 0;
+				var shapeData = new Array();
+				var shapeNormals = new Array();
+				var shapeIndices = new Array();
+				var numShapes = 0;
+				if(model.spheres){
+					shapeType = 1;
+					var j = 0, k = 0;
+					for(var i = 0; i < model.spheres[0].centers.length; i++, k++){
+						if(i > 0 && i % 3 == 0){
+							shapeData[k++] = model.spheres[0].radii[j++];
+						}
+						shapeData[k] = model.spheres[0].centers[i];
+					}
+					shapeData[k] = model.spheres[0].radii[j];
+					shapeNormals[0] = 0;
+					shapeIndices[0] = 0;
+					numShapes = shapeData.length/4;
+				}
+				else if(model.meshes){
+					shapeType = 2;
+					shapeData = padArray(model.meshes[0].vertexPositions, 3);
+					shapeNormals = padArray(model.meshes[0].vertexNormals, 3);
+					shapeIndices = padArray(model.meshes[0].indices, 3);
+					numShapes = shapeIndices.length/4;
+				}
+				else{
+					throw "Model error: No shape data";
+				}
+				//console.log(shapeIndices);
+				//var sphereCenters = padArray(model.spheres[0].centers, 3);
+				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
+				clBuffers.shapeNormalsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeNormals.length);
+				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
+				
+				var boundingShape = new Object();
+				
+				var xmin = Number.MAX_VALUE;
+				var ymin = Number.MAX_VALUE;
+				var zmin = Number.MAX_VALUE;
+					
+				var xmax = Number.MIN_VALUE;
+				var ymax = Number.MIN_VALUE;
+				var zmax = Number.MIN_VALUE;
+				
+				if(shapeType == 1){
+				
+					var centers = model.spheres[0].centers;
+					var radii = model.spheres[0].radii;
+					for ( var i = 0; i < centers.length; i+=3){
+						xmin = Math.min(xmin, centers[i]-radii[i/3]);
+						ymin = Math.min(ymin, centers[i+1]-radii[i/3]);
+						zmin = Math.min(zmin, centers[i+2]-radii[i/3]);
+						
+						xmax = Math.max(xmax, centers[i]+radii[i/3]);
+						ymax = Math.max(ymax, centers[i+1]+radii[i/3]);
+						zmax = Math.max(zmax, centers[i+2]+radii[i/3]);
+					}
+					boundingShape.min = [xmin, ymin, zmin];
+					boundingShape.max = [xmax, ymax, zmax];
+					boundingShape.center = divideVec(addVec(boundingShape.max, boundingShape.min), 2);
+					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					for( var i = 0; i < vertices.length; i+=3){
+						xmin = Math.min(xmin, vertices[i]);
+						ymin = Math.min(ymin, vertices[i+1]);
+						zmin = Math.min(zmin, vertices[i+2]);
+						
+						xmax = Math.max(xmax, vertices[i]);
+						ymax = Math.max(ymax, vertices[i+1]);
+						zmax = Math.max(zmax, vertices[i+2]);
+					}
+					boundingShape.min = [xmin, ymin, zmin];
+					boundingShape.max = [xmax, ymax, zmax];
+					boundingShape.center = divideVec(addVec(boundingShape.max, boundingShape.min), 2);
+					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
+				}
+				
+				//console.log(boundingShape);
+				
+				var eye = 0;
+				var at = 0;
+				var up = 0;
+				var fov = 0;
+				if( model.cameras ){
+					camera.eye = model.cameras[0].eye;
+					camera.at = model.cameras[0].at;
+					camera.up = model.cameras[0].up;
+					camera.fov = model.cameras[0].fov;
+				}
+				else{
+					camera.eye = [boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+					camera.at = boundingShape.center;
+					camera.up = [0, 1, 0];
+					camera.fov = 45;
+				}
+				
+				camera.radius = vecLength(subtractVec(camera.eye, camera.at));
+				camera.phi = 0;
+				camera.theta = 90 * Math.PI / 180;
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var aspectRatio = canvas.width/canvas.height;
+				var height = 2 * Math.tan(camera.fov*Math.PI/180/2);
+				var width = aspectRatio * height;
+				viewDimensions = [canvas.width, canvas.height, width, height].concat(boundingShape.min, [0], boundingShape.max, [0]);
+				var viewData = viewDimensions.concat(cameraData);
+				console.log(viewDimensions);
+				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
+				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*canvas.width*canvas.height);
+				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
+
+				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
+				clKernels.colorKernel.setKernelArg(0, shapeType, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(1, numShapes, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(2, clBuffers.viewDataBuffer);
+				clKernels.colorKernel.setKernelArg(3, clBuffers.shapeDataBuffer);
+				clKernels.colorKernel.setKernelArg(4, clBuffers.shapeNormalsBuffer);
+				clKernels.colorKernel.setKernelArg(5, clBuffers.shapeIndicesBuffer);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(7, clBuffers.debugBuffer);
+				//console.log(device);
+				wsSize = clKernels.colorKernel.getKernelWorkGroupInfo(device, WebCL.CL_KERNEL_WORK_GROUP_SIZE);
+				xSize = Math.floor(Math.sqrt(wsSize)); 
+				ySize = Math.floor(wsSize/xSize);
+				localWS = [xSize,ySize];
+				globalWS = [
+					Math.ceil (canvas.width / localWS[0]) * localWS[0], 
+					Math.ceil (canvas.height / localWS[1]) * localWS[1]
+				];
+				
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeNormalsBuffer, true, 0, 4*shapeNormals.length, new Float32Array(shapeNormals), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
+				clCQ.finish();
+				console.log("Compute time: "+(new Date().getTime()-startTime));	
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+				sceneLoaded = true;
+				
+				//var debug = new Float32Array(16);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
+				//console.log(debug);
+					
+			}
+			
+			function printClError(err){
+				var errString="";
+				switch (err) {
+					case CL_SUCCESS:                            errString = "Success!"; break;
+					case CL_DEVICE_NOT_FOUND:                   errString = "Device not found."; break;
+					case CL_DEVICE_NOT_AVAILABLE:               errString = "Device not available"; break;
+					case CL_COMPILER_NOT_AVAILABLE:             errString = "Compiler not available"; break;
+					case CL_MEM_OBJECT_ALLOCATION_FAILURE:      errString = "Memory object allocation failure"; break;
+					case CL_OUT_OF_RESOURCES:                   errString = "Out of resources"; break;
+					case CL_OUT_OF_HOST_MEMORY:                 errString = "Out of host memory"; break;
+					case CL_PROFILING_INFO_NOT_AVAILABLE:       errString = "Profiling information not available"; break;
+					case CL_MEM_COPY_OVERLAP:                   errString = "Memory copy overlap"; break;
+					case CL_IMAGE_FORMAT_MISMATCH:              errString = "Image format mismatch"; break;
+					case CL_IMAGE_FORMAT_NOT_SUPPORTED:         errString = "Image format not supported"; break;
+					case CL_BUILD_PROGRAM_FAILURE:              errString = "Program build failure"; break;
+					case CL_MAP_FAILURE:                        errString = "Map failure"; break;
+					case CL_MISALIGNED_SUB_BUFFER_OFFSET:       errString = "Map failure"; break;
+					case CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST: errString = "Execution Status Error for Events in Wait List"; break;
+					case CL_COMPILE_PROGRAM_FAILURE:            errString = "Compile Program failure"; break;
+					case CL_LINKER_NOT_AVAILABLE:               errString = "Linker Not Available"; break;
+					case CL_LINK_PROGRAM_FAILURE:               errString = "Link Program failure"; break;
+					case CL_DEVICE_PARTITION_FAILED:            errString = "Device Partition Failed"; break;
+					case CL_KERNEL_ARG_INFO_NOT_AVAILABLE:      errString = "Kernel Argument Information Not Available"; break;
+					case CL_INVALID_VALUE:                      errString = "Invalid value"; break;
+					case CL_INVALID_DEVICE_TYPE:                errString = "Invalid device type"; break;
+					case CL_INVALID_PLATFORM:                   errString = "Invalid platform"; break;
+					case CL_INVALID_DEVICE:                     errString = "Invalid device"; break;
+					case CL_INVALID_CONTEXT:                    errString = "Invalid context"; break;
+					case CL_INVALID_QUEUE_PROPERTIES:           errString = "Invalid queue properties"; break;
+					case CL_INVALID_COMMAND_QUEUE:              errString = "Invalid command queue"; break;
+					case CL_INVALID_HOST_PTR:                   errString = "Invalid host pointer"; break;
+					case CL_INVALID_MEM_OBJECT:                 errString = "Invalid memory object"; break;
+					case CL_INVALID_IMAGE_FORMAT_DESCRIPTOR:    errString = "Invalid image format descriptor"; break;
+					case CL_INVALID_IMAGE_SIZE:                 errString = "Invalid image size"; break;
+					case CL_INVALID_SAMPLER:                    errString = "Invalid sampler"; break;
+					case CL_INVALID_BINARY:                     errString = "Invalid binary"; break;
+					case CL_INVALID_BUILD_OPTIONS:              errString = "Invalid build options"; break;
+					case CL_INVALID_PROGRAM:                    errString = "Invalid program"; break;
+					case CL_INVALID_PROGRAM_EXECUTABLE:         errString = "Invalid program executable"; break;
+					case CL_INVALID_KERNEL_NAME:                errString = "Invalid kernel name"; break;
+					case CL_INVALID_KERNEL_DEFINITION:          errString = "Invalid kernel definition"; break;
+					case CL_INVALID_KERNEL:                     errString = "Invalid kernel"; break;
+					case CL_INVALID_ARG_INDEX:                  errString = "Invalid argument index"; break;
+					case CL_INVALID_ARG_VALUE:                  errString = "Invalid argument value"; break;
+					case CL_INVALID_ARG_SIZE:                   errString = "Invalid argument size"; break;
+					case CL_INVALID_KERNEL_ARGS:                errString = "Invalid kernel arguments"; break;
+					case CL_INVALID_WORK_DIMENSION:             errString = "Invalid work dimension"; break;
+					case CL_INVALID_WORK_GROUP_SIZE:            errString = "Invalid work group size"; break;
+					case CL_INVALID_WORK_ITEM_SIZE:             errString = "Invalid work item size"; break;
+					case CL_INVALID_GLOBAL_OFFSET:              errString = "Invalid global offset"; break;
+					case CL_INVALID_EVENT_WAIT_LIST:            errString = "Invalid event wait list"; break;
+					case CL_INVALID_EVENT:                      errString = "Invalid event"; break;
+					case CL_INVALID_OPERATION:                  errString = "Invalid operation"; break;
+					case CL_INVALID_GL_OBJECT:                  errString = "Invalid OpenGL object"; break;
+					case CL_INVALID_BUFFER_SIZE:                errString = "Invalid buffer size"; break;
+					case CL_INVALID_MIP_LEVEL:                  errString = "Invalid mip-map level"; break;
+					case CL_INVALID_GLOBAL_WORK_SIZE:           errString = "Invalid Global Work Size"; break;
+					case CL_INVALID_IMAGE_DESCRIPTOR:           errString = "Invalid Image Descriptor";break;
+					case CL_INVALID_COMPILER_OPTIONS:           errString = "Invalid Compiler Options";break;
+					case CL_INVALID_LINKER_OPTIONS:             errString = "Invalid Linker Options";break;
+					case CL_INVALID_DEVICE_PARTITION_COUNT:     errString = "Invalid Device Partition Count";break;
+					default: errString = "Unknown error"; break;
+				}
+				return errString;
+			}
+			function main(){
+				document.getElementById("inputFile").value = "";
+								
+				try{
+					canvas = document.getElementById("myCanvas");
+					canvasCtx = canvas.getContext("2d");
+					raster = canvasCtx.createImageData(canvas.width, canvas.height);
+					
+					platforms = WebCL.getPlatformIDs();
+					for ( var i in platforms ){
+						devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_DEFAULT);
+					}
+					//console.log(platforms);
+					//console.log(devices);
+					device = devices[0][0];
+					clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
+					clCQ = clCtx.createCommandQueue(devices[0][0], 0);
+					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
+					clProgram.buildProgram(devices[0], "");
+					
+					var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
+					(function callback(){
+						requestAnimationFrame(callback);
+						if(sceneLoaded && rotate)
+							updateCamera();
+					})();
+					//console.log(clBuffers);
+				}catch(e){
+					console.log(e);
+					console.log(clProgram.getProgramBuildInfo(devices[0][0], WebCL.CL_PROGRAM_BUILD_LOG));
+					return -1;
+				}
+			}
+			
+			function releaseResources(){
+				for ( x in clBuffers){
+					clBuffers[x].releaseCLResources();
+				}
+				for ( x in clKernels){
+					clKernels[x].releaseCLResources();
+				}
+				clCQ.releaseCLResources();
+				clProgram.releaseCLResources();
+				clCtx.releaseCLResources();
+			}
+		</script>
+	</head>
+	<body onload="main();" onunload="releaseResources();">
+		<p>Hello, please select a file. The file must be in the current directory.</p>
+		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
+		<br>
+		<div style="float:left">
+			<canvas id="myCanvas" width="640" height="480"></canvas>
+		</div>
+		<div style="float:left">
+			<p>Camera Controls</p>
+			<input type="button" onclick="updateRotate();" value="Start/Stop Rotation">
+		</div>
+	</body>
+</html>
+

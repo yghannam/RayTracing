@@ -112,7 +112,7 @@ Assignment 1
 			
 			}
 			
-			bool boundingBoxIntersect(Ray ray, float3 boundMin, float3 boundMax){
+			float boundingBoxIntersect(Ray ray, float3 boundMin, float3 boundMax){
 				float temp = 1.f / ray.d.x;
 				float txmin = (boundMin.x - ray.o.x) * temp;
 				float txmax = (boundMax.x - ray.o.x) * temp;
@@ -143,7 +143,7 @@ Assignment 1
 				float tmin = max(txmin, max(tymin, tzmin));
 				float tmax = min(txmax, max(tymax, tzmax));
 					
-				return (tmin < tmax);
+				return (tmin < tmax) ? tmin : -1;
 			}
 			
 			float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W){
@@ -262,7 +262,8 @@ Assignment 1
 					
 					uchar4 color = (uchar4)(0, 255, 0, 255);
 					
-					if(boundingBoxIntersect(worldRay, boundMin, boundMax)){
+					float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
+					if( tmin > 0){
 	
 						float3 L = (float3)(1.f,1.f,0.f);
 						
@@ -273,6 +274,20 @@ Assignment 1
 						float shininess = 10;
 						
 						float epsilon = pow(10.f, -2.f);
+						
+						/*
+						int di = (worldRay.d.x >= 0) ? 1 : -1;
+						int xOutOfRange = (worldRay.d.x >= 0) ? xResolution : -1;
+						float dTx = xSize / abs(worldRay.d.x);
+						
+						int dj = (worldRay.d.y >= 0) ? 1 : -1;
+						int yOutOfRange = (worldRay.d.y >= 0) ? yResolution : -1;
+						float dTy = ySize / abs(worldRay.d.y);
+						
+						int dk = (worldRay.d.z >= 0) ? 1 : -1;
+						int zOutOfRange = (worldRay.d.z >= 0) ? zResolution : -1;
+						float dTz = zSize / abs(worldRay.d.z);
+						*/
 						
 						Intersection intersection 
 							= intersect(worldRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);								
@@ -334,6 +349,9 @@ Assignment 1
 			var clProgram = null;
 			var clKernels = new Object();
 			var clBuffers = new Object();
+			var shapeType = 0;
+			var numShapes = 0;
+			var boundingVolume;
 			var viewDimensions = null;
 			var camera = new Object();
 			var rotate = false;
@@ -437,7 +455,7 @@ Assignment 1
 				//camera.theta += Math.PI/360;
 				camera.eye[0] = camera.radius * Math.sin(camera.theta) * Math.cos(camera.phi);
 				camera.eye[1] = camera.radius * Math.cos(camera.theta);
-				camera.eye[2] = camera.radius * Math.sin(camera.theta) * Math.sin(camera.phi);//[boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
+				camera.eye[2] = camera.radius * Math.sin(camera.theta) * Math.sin(camera.phi);//[boundingVolume.center[0], boundingVolume.center[1], boundingVolume.center[2]+boundingVolume.diagonal];
 				
 				var W = normalize( subtractVec(camera.eye, camera.at));
 				var U = normalize( cross(camera.up, W));
@@ -457,13 +475,167 @@ Assignment 1
 				canvasCtx.putImageData(raster, 0, 0);
 			}
 			
+			function createBoundingVolume(){
+				boundingVolume = new Object();
+				
+				var xmin = Number.MAX_VALUE;
+				var ymin = Number.MAX_VALUE;
+				var zmin = Number.MAX_VALUE;
+					
+				var xmax = Number.MIN_VALUE;
+				var ymax = Number.MIN_VALUE;
+				var zmax = Number.MIN_VALUE;
+				
+				if(shapeType == 1){
+				
+					var centers = model.spheres[0].centers;
+					var radii = model.spheres[0].radii;
+					for ( var i = 0; i < centers.length; i+=3){
+						xmin = Math.min(xmin, centers[i]-radii[i/3]);
+						ymin = Math.min(ymin, centers[i+1]-radii[i/3]);
+						zmin = Math.min(zmin, centers[i+2]-radii[i/3]);
+						
+						xmax = Math.max(xmax, centers[i]+radii[i/3]);
+						ymax = Math.max(ymax, centers[i+1]+radii[i/3]);
+						zmax = Math.max(zmax, centers[i+2]+radii[i/3]);
+					}
+					boundingVolume.min = [xmin, ymin, zmin];
+					boundingVolume.max = [xmax, ymax, zmax];
+					boundingVolume.center = divideVec(addVec(boundingVolume.max, boundingVolume.min), 2);
+					boundingVolume.diagonal = vecLength(subtractVec(boundingVolume.max, boundingVolume.min));
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					for( var i = 0; i < vertices.length; i+=3){
+						xmin = Math.min(xmin, vertices[i]);
+						ymin = Math.min(ymin, vertices[i+1]);
+						zmin = Math.min(zmin, vertices[i+2]);
+						
+						xmax = Math.max(xmax, vertices[i]);
+						ymax = Math.max(ymax, vertices[i+1]);
+						zmax = Math.max(zmax, vertices[i+2]);
+					}
+					boundingVolume.min = [xmin, ymin, zmin];
+					boundingVolume.max = [xmax, ymax, zmax];
+					boundingVolume.center = divideVec(addVec(boundingVolume.max, boundingVolume.min), 2);
+					boundingVolume.diagonal = vecLength(subtractVec(boundingVolume.max, boundingVolume.min));
+				}
+				
+				boundingVolume.xSize = boundingVolume.max[0]-boundingVolume.min[0];
+				boundingVolume.ySize = boundingVolume.max[1]-boundingVolume.min[1];
+				boundingVolume.zSize = boundingVolume.max[2]-boundingVolume.min[2];
+			}
+			
+			function offset(x, y, z){
+				return x + (y + z*boundingVolume.grid.yResolution)*boundingVolume.grid.xResolution;
+			}
+			
+			function createGrid(){
+				boundingVolume.grid = new Object();
+				var maxResolution = 64;
+				var a = 3 * Math.max(boundingVolume.xSize, boundingVolume.ySize, boundingVolume.zSize) / Math.pow(numShapes, 1.0/3.0);
+				boundingVolume.grid.xResolution = Math.round(boundingVolume.xSize/a);
+				boundingVolume.grid.xResolution = (boundingVolume.grid.xResolution < 1) ? 1 : 
+													( (boundingVolume.grid.xResolution > maxResolution) ? 64 : boundingVolume.grid.xResolution);
+				boundingVolume.grid.yResolution = Math.round(boundingVolume.ySize/a);
+				boundingVolume.grid.yResolution = (boundingVolume.grid.yResolution < 1) ? 1 : 
+													( (boundingVolume.grid.yResolution > maxResolution) ? 64 : boundingVolume.grid.yResolution);
+				boundingVolume.grid.zResolution = Math.round(boundingVolume.zSize/a);
+				boundingVolume.grid.zResolution = (boundingVolume.grid.zResolution < 1) ? 1 : 
+													( (boundingVolume.grid.zResolution > maxResolution) ? 64 : boundingVolume.grid.zResolution);
+				//console.log("Resolutions: ",xResolution, yResolution, zResolution);
+				boundingVolume.grid.metadata = new Array();
+				boundingVolume.grid.voxels = new Array();
+				boundingVolume.grid.numVoxels = boundingVolume.grid.xResolution * boundingVolume.grid.yResolution * boundingVolume.grid.zResolution;
+				for (var i = 0; i < boundingVolume.grid.numVoxels; i++){
+					boundingVolume.grid.metadata[i] = [0,0];
+					boundingVolume.grid.voxels[i] = new Array();
+				}
+				
+				if(shapeType == 1){
+				
+					var centers = model.spheres[0].centers;
+					var radii = model.spheres[0].radii;
+					for ( var i = 0; i < centers.length; i+=3){
+						var xmin = centers[i]-radii[i/3];
+						var ymin = centers[i+1]-radii[i/3];
+						var zmin = centers[i+2]-radii[i/3];
+						
+						var xmax = centers[i]+radii[i/3];
+						var ymax = centers[i+1]+radii[i/3];
+						var zmax = centers[i+2]+radii[i/3];
+						
+						var gridMin = gridIndex([xmin, ymin, zmin]);
+						var gridMax = gridIndex([xmax, ymax, zmax]);
+						for(var x = gridMin[0]; x <= gridMax[0]; x++)
+							for(var y = gridMin[1]; y <= gridMax[1]; y++)
+								for(var z = gridMin[2]; z <= gridMax[2]; z++)
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+						
+					}
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					var indices = model.meshes[0].indices;
+					for( var i = 0; i < indices.length; i+=3){
+						var one = indices[i]*3;
+						var two = indices[i+1]*3;
+						var three = indices[i+2]*3;
+						
+						var xmin = Math.min(vertices[one], vertices[two], vertices[three]);
+						var ymin = Math.min(vertices[one+1], vertices[two+1], vertices[three+1]);
+						var zmin = Math.min(vertices[one+2], vertices[two+2], vertices[three+2]);
+						
+						var xmax = Math.max(vertices[one], vertices[two], vertices[three]);
+						var ymax = Math.max(vertices[one+1], vertices[two+1], vertices[three+1]);
+						var zmax = Math.max(vertices[one+2], vertices[two+2], vertices[three+2]);
+						
+						var gridMin = gridIndex([xmin, ymin, zmin]);
+						var gridMax = gridIndex([xmax, ymax, zmax]);
+						for(var x = gridMin[0]; x <= gridMax[0]; x++)
+							for(var y = gridMin[1]; y <= gridMax[1]; y++)
+								for(var z = gridMin[2]; z <= gridMax[2]; z++){
+									console.log(x, y, z);
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+								}
+					}
+				}
+				
+				boundingVolume.grid.metadataFlat = []
+				boundingVolume.grid.voxelsFlat = [];
+				var voxelOffset = 0;
+				for (var i = 0; i < boundingVolume.grid.numVoxels; i++){
+					var voxelLength = (boundingVolume.grid.voxels[i].length) ? boundingVolume.grid.voxels[i].length : 0;
+					boundingVolume.grid.metadata[i] = [voxelLength, voxelOffset];
+					voxelOffset += voxelLength;
+					
+					boundingVolume.grid.metadataFlat = boundingVolume.grid.metadataFlat.concat(boundingVolume.grid.metadata[i]);
+					boundingVolume.grid.voxelsFlat = boundingVolume.grid.voxelsFlat.concat(boundingVolume.grid.voxels[i]);
+				}
+				console.log(boundingVolume);
+			}
+			
+			function gridIndex(point){
+				var x = Math.round((point[0]-boundingVolume.min[0])/boundingVolume.xSize);
+				x = (x < 0) ? 0 : ( (x > boundingVolume.grid.xResolution - 1) ? boundingVolume.grid.xResolution-1 : x);
+				
+				var y = Math.round((point[1]-boundingVolume.min[1])/boundingVolume.ySize);
+				y = (y < 0) ? 0 : ( (y > boundingVolume.grid.yResolution - 1) ? boundingVolume.grid.yResolution-1 : y);
+				
+				var z = Math.round((point[2]-boundingVolume.min[2])/boundingVolume.zSize);
+				z = (z < 0) ? 0 : ( (z > boundingVolume.grid.zResolution - 1) ? boundingVolume.grid.zResolution-1 : z);
+				
+				return [x, y, z];
+			}
+			
 			function loadScene(){
 				
-				var shapeType = 0;
+				
 				var shapeData = new Array();
 				var shapeNormals = new Array();
 				var shapeIndices = new Array();
-				var numShapes = 0;
 				if(model.spheres){
 					shapeType = 1;
 					var j = 0, k = 0;
@@ -494,53 +666,13 @@ Assignment 1
 				clBuffers.shapeNormalsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeNormals.length);
 				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
 				
-				var boundingShape = new Object();
+				createBoundingVolume();
+				createGrid();
+				//var boxVolume = boundingVolume.xSize * boundingVolume.ySize * boundingVolume.zSize;
 				
-				var xmin = Number.MAX_VALUE;
-				var ymin = Number.MAX_VALUE;
-				var zmin = Number.MAX_VALUE;
-					
-				var xmax = Number.MIN_VALUE;
-				var ymax = Number.MIN_VALUE;
-				var zmax = Number.MIN_VALUE;
 				
-				if(shapeType == 1){
 				
-					var centers = model.spheres[0].centers;
-					var radii = model.spheres[0].radii;
-					for ( var i = 0; i < centers.length; i+=3){
-						xmin = Math.min(xmin, centers[i]-radii[i/3]);
-						ymin = Math.min(ymin, centers[i+1]-radii[i/3]);
-						zmin = Math.min(zmin, centers[i+2]-radii[i/3]);
-						
-						xmax = Math.max(xmax, centers[i]+radii[i/3]);
-						ymax = Math.max(ymax, centers[i+1]+radii[i/3]);
-						zmax = Math.max(zmax, centers[i+2]+radii[i/3]);
-					}
-					boundingShape.min = [xmin, ymin, zmin];
-					boundingShape.max = [xmax, ymax, zmax];
-					boundingShape.center = divideVec(addVec(boundingShape.max, boundingShape.min), 2);
-					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
-				}
-				else if(shapeType == 2){					
-					
-					var vertices = model.meshes[0].vertexPositions;
-					for( var i = 0; i < vertices.length; i+=3){
-						xmin = Math.min(xmin, vertices[i]);
-						ymin = Math.min(ymin, vertices[i+1]);
-						zmin = Math.min(zmin, vertices[i+2]);
-						
-						xmax = Math.max(xmax, vertices[i]);
-						ymax = Math.max(ymax, vertices[i+1]);
-						zmax = Math.max(zmax, vertices[i+2]);
-					}
-					boundingShape.min = [xmin, ymin, zmin];
-					boundingShape.max = [xmax, ymax, zmax];
-					boundingShape.center = divideVec(addVec(boundingShape.max, boundingShape.min), 2);
-					boundingShape.diagonal = vecLength(subtractVec(boundingShape.max, boundingShape.min));
-				}
-				
-				//console.log(boundingShape);
+				console.log(boundingVolume);
 				
 				var eye = 0;
 				var at = 0;
@@ -553,8 +685,8 @@ Assignment 1
 					camera.fov = model.cameras[0].fov;
 				}
 				else{
-					camera.eye = [boundingShape.center[0], boundingShape.center[1], boundingShape.center[2]+boundingShape.diagonal];
-					camera.at = boundingShape.center;
+					camera.eye = [boundingVolume.center[0], boundingVolume.center[1], boundingVolume.center[2]+boundingVolume.diagonal];
+					camera.at = boundingVolume.center;
 					camera.up = [0, 1, 0];
 					camera.fov = 45;
 				}
@@ -570,7 +702,7 @@ Assignment 1
 				var aspectRatio = canvas.width/canvas.height;
 				var height = 2 * Math.tan(camera.fov*Math.PI/180/2);
 				var width = aspectRatio * height;
-				viewDimensions = [canvas.width, canvas.height, width, height].concat(boundingShape.min, [0], boundingShape.max, [0]);
+				viewDimensions = [canvas.width, canvas.height, width, height].concat(boundingVolume.min, [0], boundingVolume.max, [0]);
 				var viewData = viewDimensions.concat(cameraData);
 				console.log(viewDimensions);
 				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
@@ -614,71 +746,6 @@ Assignment 1
 					
 			}
 			
-			function printClError(err){
-				var errString="";
-				switch (err) {
-					case CL_SUCCESS:                            errString = "Success!"; break;
-					case CL_DEVICE_NOT_FOUND:                   errString = "Device not found."; break;
-					case CL_DEVICE_NOT_AVAILABLE:               errString = "Device not available"; break;
-					case CL_COMPILER_NOT_AVAILABLE:             errString = "Compiler not available"; break;
-					case CL_MEM_OBJECT_ALLOCATION_FAILURE:      errString = "Memory object allocation failure"; break;
-					case CL_OUT_OF_RESOURCES:                   errString = "Out of resources"; break;
-					case CL_OUT_OF_HOST_MEMORY:                 errString = "Out of host memory"; break;
-					case CL_PROFILING_INFO_NOT_AVAILABLE:       errString = "Profiling information not available"; break;
-					case CL_MEM_COPY_OVERLAP:                   errString = "Memory copy overlap"; break;
-					case CL_IMAGE_FORMAT_MISMATCH:              errString = "Image format mismatch"; break;
-					case CL_IMAGE_FORMAT_NOT_SUPPORTED:         errString = "Image format not supported"; break;
-					case CL_BUILD_PROGRAM_FAILURE:              errString = "Program build failure"; break;
-					case CL_MAP_FAILURE:                        errString = "Map failure"; break;
-					case CL_MISALIGNED_SUB_BUFFER_OFFSET:       errString = "Map failure"; break;
-					case CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST: errString = "Execution Status Error for Events in Wait List"; break;
-					case CL_COMPILE_PROGRAM_FAILURE:            errString = "Compile Program failure"; break;
-					case CL_LINKER_NOT_AVAILABLE:               errString = "Linker Not Available"; break;
-					case CL_LINK_PROGRAM_FAILURE:               errString = "Link Program failure"; break;
-					case CL_DEVICE_PARTITION_FAILED:            errString = "Device Partition Failed"; break;
-					case CL_KERNEL_ARG_INFO_NOT_AVAILABLE:      errString = "Kernel Argument Information Not Available"; break;
-					case CL_INVALID_VALUE:                      errString = "Invalid value"; break;
-					case CL_INVALID_DEVICE_TYPE:                errString = "Invalid device type"; break;
-					case CL_INVALID_PLATFORM:                   errString = "Invalid platform"; break;
-					case CL_INVALID_DEVICE:                     errString = "Invalid device"; break;
-					case CL_INVALID_CONTEXT:                    errString = "Invalid context"; break;
-					case CL_INVALID_QUEUE_PROPERTIES:           errString = "Invalid queue properties"; break;
-					case CL_INVALID_COMMAND_QUEUE:              errString = "Invalid command queue"; break;
-					case CL_INVALID_HOST_PTR:                   errString = "Invalid host pointer"; break;
-					case CL_INVALID_MEM_OBJECT:                 errString = "Invalid memory object"; break;
-					case CL_INVALID_IMAGE_FORMAT_DESCRIPTOR:    errString = "Invalid image format descriptor"; break;
-					case CL_INVALID_IMAGE_SIZE:                 errString = "Invalid image size"; break;
-					case CL_INVALID_SAMPLER:                    errString = "Invalid sampler"; break;
-					case CL_INVALID_BINARY:                     errString = "Invalid binary"; break;
-					case CL_INVALID_BUILD_OPTIONS:              errString = "Invalid build options"; break;
-					case CL_INVALID_PROGRAM:                    errString = "Invalid program"; break;
-					case CL_INVALID_PROGRAM_EXECUTABLE:         errString = "Invalid program executable"; break;
-					case CL_INVALID_KERNEL_NAME:                errString = "Invalid kernel name"; break;
-					case CL_INVALID_KERNEL_DEFINITION:          errString = "Invalid kernel definition"; break;
-					case CL_INVALID_KERNEL:                     errString = "Invalid kernel"; break;
-					case CL_INVALID_ARG_INDEX:                  errString = "Invalid argument index"; break;
-					case CL_INVALID_ARG_VALUE:                  errString = "Invalid argument value"; break;
-					case CL_INVALID_ARG_SIZE:                   errString = "Invalid argument size"; break;
-					case CL_INVALID_KERNEL_ARGS:                errString = "Invalid kernel arguments"; break;
-					case CL_INVALID_WORK_DIMENSION:             errString = "Invalid work dimension"; break;
-					case CL_INVALID_WORK_GROUP_SIZE:            errString = "Invalid work group size"; break;
-					case CL_INVALID_WORK_ITEM_SIZE:             errString = "Invalid work item size"; break;
-					case CL_INVALID_GLOBAL_OFFSET:              errString = "Invalid global offset"; break;
-					case CL_INVALID_EVENT_WAIT_LIST:            errString = "Invalid event wait list"; break;
-					case CL_INVALID_EVENT:                      errString = "Invalid event"; break;
-					case CL_INVALID_OPERATION:                  errString = "Invalid operation"; break;
-					case CL_INVALID_GL_OBJECT:                  errString = "Invalid OpenGL object"; break;
-					case CL_INVALID_BUFFER_SIZE:                errString = "Invalid buffer size"; break;
-					case CL_INVALID_MIP_LEVEL:                  errString = "Invalid mip-map level"; break;
-					case CL_INVALID_GLOBAL_WORK_SIZE:           errString = "Invalid Global Work Size"; break;
-					case CL_INVALID_IMAGE_DESCRIPTOR:           errString = "Invalid Image Descriptor";break;
-					case CL_INVALID_COMPILER_OPTIONS:           errString = "Invalid Compiler Options";break;
-					case CL_INVALID_LINKER_OPTIONS:             errString = "Invalid Linker Options";break;
-					case CL_INVALID_DEVICE_PARTITION_COUNT:     errString = "Invalid Device Partition Count";break;
-					default: errString = "Unknown error"; break;
-				}
-				return errString;
-			}
 			function main(){
 				document.getElementById("inputFile").value = "";
 								

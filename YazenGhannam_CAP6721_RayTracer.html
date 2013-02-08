@@ -284,7 +284,7 @@ Assignment 1
 			int3 gridIndex(float3 point, float3 boundMin, float3 boundSize, int3 gridRes){
 				return (int3)(	clamp( (int)round((point.x-boundMin.x)/boundSize.x), 0, gridRes.x-1),
 								clamp( (int)round((point.y-boundMin.y)/boundSize.y), 0, gridRes.y-1),
-								clamp( (int)round((point.z-boundMin.z)/boundSize.z), 0, (gridRes.z-1)));			
+								clamp( (int)round((point.z-boundMin.z)/boundSize.z), 0, gridRes.z-1));			
 			}
 			
 			__kernel void getPixelColor(
@@ -356,32 +356,34 @@ Assignment 1
 						
 						float epsilon = pow(10.f, -2.f);
 						
-						if(accelerated){
+						if(accelerated){					
 							
+							float3 boundSize = fabs(boundMax-boundMin);
 							
 							int di = (worldRay.d.x >= 0) ? 1 : -1;
 							int xOutOfRange = (worldRay.d.x >= 0) ? gridRes.x : -1;
-							float dTx = (boundMax.x-boundMin.x) / fabs(worldRay.d.x);
+							float dTx = (boundSize.x) / fabs(worldRay.d.x);
 							
 							int dj = (worldRay.d.y >= 0) ? 1 : -1;
 							int yOutOfRange = (worldRay.d.y >= 0) ? gridRes.y : -1;
-							float dTy = (boundMax.y-boundMin.y) / fabs(worldRay.d.y);
+							float dTy = (boundSize.y) / fabs(worldRay.d.y);
 							
 							int dk = (worldRay.d.z >= 0) ? 1 : -1;
 							int zOutOfRange = (worldRay.d.z >= 0) ? gridRes.z : -1;
-							float dTz = (boundMax.z-boundMin.z) / fabs(worldRay.d.z);
+							float dTz = (boundSize.z) / fabs(worldRay.d.z);
 							
 							
 							bool intersected = false;
-							float3 gridPoint = worldRay.o + max(0.f, tmin) * worldRay.d;
-							int3 gridCoord = gridIndex(gridPoint, boundMin, boundMax-boundMin, gridRes);
-							float tCurrent = min(0.f, tmin);
-							float dX = (boundMax.x - boundMin.x) / gridRes.x;
+							float tCurrent = max(0.f, tmin);
+							float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
+							int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
+							float dX = (boundSize.x) / gridRes.x;
 							float txNext = (boundMin.x + (gridCoord.x+di) * dX - worldRay.o.x) / fabs(worldRay.d.x);
-							float dY = (boundMax.y - boundMin.y) / gridRes.y;
+							float dY = (boundSize.y) / gridRes.y;
 							float tyNext = (boundMin.y + (gridCoord.y+di) * dY - worldRay.o.y) / fabs(worldRay.d.y);
-							float dZ = (boundMax.z - boundMin.z) / gridRes.z;
+							float dZ = (boundSize.z) / gridRes.z;
 							float tzNext = (boundMin.z + (gridCoord.z+di) * dZ - worldRay.o.z) / fabs(worldRay.d.z);
+							
 							while(!intersected){
 								
 								if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
@@ -395,17 +397,17 @@ Assignment 1
 								intersected = (intersection.t < INFINITY);
 								
 								if(!intersected){
-									if(txNext <= tyNext && txNext <= tzNext){
+									if(txNext < tyNext && txNext < tzNext){
 										gridCoord.x += di;
 										tCurrent = txNext;
 										txNext += dTx;
 									}
-									else if(tyNext <= txNext && tyNext <= tzNext){
+									else if(tyNext < txNext && tyNext < tzNext){
 										gridCoord.y += dj;
 										tCurrent = tyNext;
 										tyNext += dTy;
 									}
-									else if(tzNext <= tyNext && tzNext <= txNext){
+									else{
 										gridCoord.z += dk;
 										tCurrent = tzNext;
 										tzNext += dTz;
@@ -414,8 +416,7 @@ Assignment 1
 							}
 							
 						}
-						else{
-						
+						else{						
 							intersection 
 								= intersect(worldRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);								
 						}
@@ -882,9 +883,9 @@ Assignment 1
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
 				
-				var debug = new Float32Array(16);
-				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
-				console.log(debug);
+				//var debug = new Float32Array(16);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
+				//console.log(debug);
 					
 			}
 			

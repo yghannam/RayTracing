@@ -383,6 +383,7 @@ Assignment 1
 							float tyNext = (boundMin.y + (gridCoord.y+di) * dY - worldRay.o.y) / fabs(worldRay.d.y);
 							float dZ = (boundSize.z) / gridRes.z;
 							float tzNext = (boundMin.z + (gridCoord.z+di) * dZ - worldRay.o.z) / fabs(worldRay.d.z);
+							const int cmpToAxis[8] = { 2, 1, 2, 1, 2, 2, 0, 0};
 							
 							while(!intersected){
 								
@@ -397,12 +398,16 @@ Assignment 1
 								intersected = (intersection.t < INFINITY);
 								
 								if(!intersected){
-									if(txNext < tyNext && txNext < tzNext){
+									int bits =  ((txNext < tyNext) << 2) +
+												((txNext < tzNext) << 1) +
+												((tyNext < tzNext));
+									int stepAxis = cmpToAxis[bits];
+									if(stepAxis == 0){
 										gridCoord.x += di;
 										tCurrent = txNext;
 										txNext += dTx;
 									}
-									else if(tyNext < txNext && tyNext < tzNext){
+									else if(stepAxis == 1){
 										gridCoord.y += dj;
 										tCurrent = tyNext;
 										tyNext += dTy;
@@ -733,10 +738,8 @@ Assignment 1
 						var gridMax = gridIndex([xmax, ymax, zmax]);
 						for(var x = gridMin[0]; x <= gridMax[0]; x++)
 							for(var y = gridMin[1]; y <= gridMax[1]; y++)
-								for(var z = gridMin[2]; z <= gridMax[2]; z++){
-									console.log(x, y, z);
+								for(var z = gridMin[2]; z <= gridMax[2]; z++)
 									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
-								}
 					}
 				}
 				

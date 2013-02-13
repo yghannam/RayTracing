@@ -282,9 +282,9 @@ Assignment 1
 			}
 			
 			int3 gridIndex(float3 point, float3 boundMin, float3 boundSize, int3 gridRes){
-				return (int3)(	clamp( (int)round((point.x-boundMin.x)/boundSize.x), 0, gridRes.x-1),
-								clamp( (int)round((point.y-boundMin.y)/boundSize.y), 0, gridRes.y-1),
-								clamp( (int)round((point.z-boundMin.z)/boundSize.z), 0, gridRes.z-1));			
+				return (int3)(	(int)clamp( round((point.x-boundMin.x)/boundSize.x), 0.f, (float)(gridRes.x-1)),
+								(int)clamp( round((point.y-boundMin.y)/boundSize.y), 0.f, (float)(gridRes.y-1)),
+								(int)clamp( round((point.z-boundMin.z)/boundSize.z), 0.f, (float)(gridRes.z-1)));			
 			}
 			
 			__kernel void getPixelColor(
@@ -318,7 +318,9 @@ Assignment 1
 					float3 V = viewData[7].xyz;					
 					float3 W = viewData[8].xyz;
 					
-					
+					int numIter = 0;
+					int3 gridI = (int3)(0,0,0);
+
 					
 					//float enableDiffuse = viewData[7].x;
 					//float enableSpecular = viewData[7].x;
@@ -356,9 +358,10 @@ Assignment 1
 						
 						float epsilon = pow(10.f, -2.f);
 						
+						
 						if(accelerated){					
 							
-							float3 boundSize = fabs(boundMax-boundMin);
+							float3 boundSize = boundMax-boundMin;
 							
 							int di = (worldRay.d.x >= 0) ? 1 : -1;
 							int xOutOfRange = (worldRay.d.x >= 0) ? gridRes.x : -1;
@@ -374,22 +377,30 @@ Assignment 1
 							
 							
 							bool intersected = false;
-							float tCurrent = max(0.f, tmin);
+							float tCurrent = tmin;//max(0.f, tmin);
 							float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
 							int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
 							float dX = (boundSize.x) / gridRes.x;
-							float txNext = (boundMin.x + (gridCoord.x+di) * dX - worldRay.o.x) / fabs(worldRay.d.x);
+							float txNext = (di == 1) ? 
+								tCurrent+((boundMin.x + (gridCoord.x+di) * dX - gridPoint.x) / worldRay.d.x) :
+								tCurrent+((boundMin.x + (gridCoord.x) * dX - gridPoint.x) / worldRay.d.x);
 							float dY = (boundSize.y) / gridRes.y;
-							float tyNext = (boundMin.y + (gridCoord.y+di) * dY - worldRay.o.y) / fabs(worldRay.d.y);
+							float tyNext = (dj == 1) ?
+								tCurrent+((boundMin.y + (gridCoord.y+dj) * dY - gridPoint.y) / worldRay.d.y) :
+								tCurrent+((boundMin.y + (gridCoord.y) * dY - gridPoint.y) / worldRay.d.y);
 							float dZ = (boundSize.z) / gridRes.z;
-							float tzNext = (boundMin.z + (gridCoord.z+di) * dZ - worldRay.o.z) / fabs(worldRay.d.z);
+							float tzNext = (dk == 1) ?
+								tCurrent+((boundMin.z + (gridCoord.z+dk) * dZ - gridPoint.z) / worldRay.d.z) :
+								tCurrent+((boundMin.z + (gridCoord.z) * dZ - gridPoint.z) / worldRay.d.z);
+							const int cmpToAxis[8] = { 2, 1, 2, 1, 2, 2, 0, 0};
 							
 							while(!intersected){
 								
 								if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
 									break;
 								
-								int voxelIndex = gridCoord.x + ( gridCoord.y + gridCoord.z*gridRes.y) * gridRes.x;
+								numIter++;
+								int voxelIndex = gridCoord.z + ( gridCoord.y + gridCoord.x*gridRes.y) * gridRes.z;
 								
 								intersection 
 									= intersectGrid(worldRay, false, shapeType, voxelIndex, gridMetadata, gridVoxels, shapeData, shapeNormals, shapeIndices);
@@ -397,23 +408,26 @@ Assignment 1
 								intersected = (intersection.t < INFINITY);
 								
 								if(!intersected){
-									if(txNext < tyNext && txNext < tzNext){
+									int bits =  ((txNext < tyNext) << 2) +
+												((txNext < tzNext) << 1) +
+												((tyNext < tzNext));
+									int stepAxis = cmpToAxis[bits];
+									if(stepAxis == 0){
 										gridCoord.x += di;
-										tCurrent = txNext;
 										txNext += dTx;
 									}
-									else if(tyNext < txNext && tyNext < tzNext){
+									else if(stepAxis == 1){
 										gridCoord.y += dj;
-										tCurrent = tyNext;
 										tyNext += dTy;
 									}
 									else{
 										gridCoord.z += dk;
-										tCurrent = tzNext;
 										tzNext += dTz;
 									}								
 								}								
 							}
+							
+							gridI = gridCoord;
 							
 						}
 						else{						
@@ -462,7 +476,8 @@ Assignment 1
 								color = (uchar4)(red, green, blue, 255);
 							}
 						}
-					raster[row * columns + col] = color;
+					gridI *= 255/4;
+					raster[row * columns + col] = (uchar4)(numIter*255/4 , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
 				}
 		</script>
 		<script type="text/javascript">
@@ -665,7 +680,7 @@ Assignment 1
 			}
 			
 			function offset(x, y, z){
-				return x + (y + z*boundingVolume.grid.yResolution)*boundingVolume.grid.xResolution;
+				return z + (y + x*boundingVolume.grid.yResolution)*boundingVolume.grid.zResolution;
 			}
 			
 			function createGrid(){
@@ -675,13 +690,16 @@ Assignment 1
 				boundingVolume.grid.xResolution = Math.round(boundingVolume.xSize/a);
 				boundingVolume.grid.xResolution = (boundingVolume.grid.xResolution < 1) ? 1 : 
 													( (boundingVolume.grid.xResolution > maxResolution) ? 64 : boundingVolume.grid.xResolution);
+				//boundingVolume.grid.xResolution = 1;
 				boundingVolume.grid.yResolution = Math.round(boundingVolume.ySize/a);
 				boundingVolume.grid.yResolution = (boundingVolume.grid.yResolution < 1) ? 1 : 
 													( (boundingVolume.grid.yResolution > maxResolution) ? 64 : boundingVolume.grid.yResolution);
+				boundingVolume.grid.yResolution = 1;
 				boundingVolume.grid.zResolution = Math.round(boundingVolume.zSize/a);
 				boundingVolume.grid.zResolution = (boundingVolume.grid.zResolution < 1) ? 1 : 
 													( (boundingVolume.grid.zResolution > maxResolution) ? 64 : boundingVolume.grid.zResolution);
-				//console.log("Resolutions: ",xResolution, yResolution, zResolution);
+				boundingVolume.grid.zResolution = 1;
+				console.log("Resolutions: ",boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution);
 				boundingVolume.grid.metadata = new Array();
 				boundingVolume.grid.voxels = new Array();
 				boundingVolume.grid.numVoxels = boundingVolume.grid.xResolution * boundingVolume.grid.yResolution * boundingVolume.grid.zResolution;
@@ -733,10 +751,8 @@ Assignment 1
 						var gridMax = gridIndex([xmax, ymax, zmax]);
 						for(var x = gridMin[0]; x <= gridMax[0]; x++)
 							for(var y = gridMin[1]; y <= gridMax[1]; y++)
-								for(var z = gridMin[2]; z <= gridMax[2]; z++){
-									console.log(x, y, z);
+								for(var z = gridMin[2]; z <= gridMax[2]; z++)
 									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
-								}
 					}
 				}
 				
@@ -751,7 +767,7 @@ Assignment 1
 					boundingVolume.grid.metadataFlat = boundingVolume.grid.metadataFlat.concat(boundingVolume.grid.metadata[i]);
 					boundingVolume.grid.voxelsFlat = boundingVolume.grid.voxelsFlat.concat(boundingVolume.grid.voxels[i]);
 				}
-				console.log(boundingVolume);
+				//console.log(boundingVolume);
 			}
 			
 			function gridIndex(point){

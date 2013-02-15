@@ -9,6 +9,7 @@ Assignment 1
 	<head>
 		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
 		<meta content="utf-8" http-equiv="encoding">
+		<script type="text/javascript" src="gl-matrix.js"></script>
 		<script id="openclProgram" type="text/x-opencl">
 			typedef struct {
 				float3 d, o;
@@ -234,7 +235,7 @@ Assignment 1
 				
 				if(numShapes > 0){
 				
-					unsigned int i = 0;
+					int i = 0;
 					if(shapeType == 1){
 						for( i = 0; i < numShapes; i++){
 							Sphere sphere;
@@ -341,14 +342,14 @@ Assignment 1
 						debug[i] = (float4)(0,0,0,0);
 					debug[0] = flags;
 					
-					uchar4 color = (uchar4)(0, 0, 0, 255);
+					uchar4 color = (uchar4)(0, 128, 0, 255);
 					
 					float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
 					if( tmin > 0){
 					
 						Intersection intersection;
 						
-						float3 L = (float3)(1.f,1.f,0.f);
+						float3 L = (float3)(1.f,1.f,-1.f);
 						
 						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
 						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
@@ -365,15 +366,15 @@ Assignment 1
 							
 							int di = (worldRay.d.x >= 0) ? 1 : -1;
 							int xOutOfRange = (worldRay.d.x >= 0) ? (int)gridRes.x : -1;
-							float dTx = (boundSize.x) / fabs(worldRay.d.x);
+							float dTx = boundSize.x / fabs(worldRay.d.x);
 							
 							int dj = (worldRay.d.y >= 0) ? 1 : -1;
 							int yOutOfRange = (worldRay.d.y >= 0) ? (int)gridRes.y : -1;
-							float dTy = (boundSize.y) / fabs(worldRay.d.y);
+							float dTy = boundSize.y / fabs(worldRay.d.y);
 							
 							int dk = (worldRay.d.z >= 0) ? 1 : -1;
 							int zOutOfRange = (worldRay.d.z >= 0) ? (int)gridRes.z : -1;
-							float dTz = (boundSize.z) / fabs(worldRay.d.z);
+							float dTz = boundSize.z / fabs(worldRay.d.z);
 							
 							
 							bool intersected = false;
@@ -392,9 +393,7 @@ Assignment 1
 							float tzNext = (dk == 1) ?
 								tCurrent+((boundMin.z + (gridCoord.z+dk) * dZ - gridPoint.z) / worldRay.d.z) :
 								tCurrent+((boundMin.z + (gridCoord.z) * dZ - gridPoint.z) / worldRay.d.z);
-								
-							const int cmpToAxis[8] = { 2, 1, 2, 1, 2, 2, 0, 0};
-							
+															
 							while(!intersected){
 								
 								if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
@@ -409,23 +408,19 @@ Assignment 1
 								intersected = (intersection.t < INFINITY);
 								
 								if(!intersected){
-									int bits =  ((txNext < tyNext) << 2) +
-												((txNext < tzNext) << 1) +
-												((tyNext < tzNext));
-									int stepAxis = cmpToAxis[bits];
-									if(stepAxis == 0){
+									if(txNext < tyNext && txNext < tzNext){
 										gridCoord.x += di;
 										txNext += dTx;
-									}
-									else if(stepAxis == 1){
+									}										
+									else if(tyNext < txNext && tyNext < tzNext){
 										gridCoord.y += dj;
 										tyNext += dTy;
 									}
-									else{
+									else{//if(tzNext < txNext && tzNext < tyNext){
 										gridCoord.z += dk;
 										tzNext += dTz;
-									}								
-								}								
+									}		
+								}
 							}
 							
 							gridI = gridCoord;
@@ -497,6 +492,9 @@ Assignment 1
 			var clBuffers = new Object();
 			var shapeType = 0;
 			var numShapes = 0;
+			var shapeData = new Array();
+			var shapeNormals = new Array();
+			var shapeIndices = new Array();
 			var boundingVolume;
 			var viewDimensions = null;
 			var flags = [0, 0, 0, 0];
@@ -641,26 +639,28 @@ Assignment 1
 				
 				if(shapeType == 1){
 				
-					var centers = model.spheres[0].centers;
-					var radii = model.spheres[0].radii;
-					for ( var i = 0; i < centers.length; i+=3){
-						xmin = Math.min(xmin, centers[i]-radii[i/3]);
-						ymin = Math.min(ymin, centers[i+1]-radii[i/3]);
-						zmin = Math.min(zmin, centers[i+2]-radii[i/3]);
+					var spheres = shapeData;
+					for ( var i = 0; i < spheres.length; i+=4){
+						var centers = [spheres[i], spheres[i+1], spheres[i+2]];
+						var radius = spheres[i+3];
+						xmin = Math.min(xmin, centers[0]-radius);
+						ymin = Math.min(ymin, centers[1]-radius);
+						zmin = Math.min(zmin, centers[2]-radius);
 						
-						xmax = Math.max(xmax, centers[i]+radii[i/3]);
-						ymax = Math.max(ymax, centers[i+1]+radii[i/3]);
-						zmax = Math.max(zmax, centers[i+2]+radii[i/3]);
+						xmax = Math.max(xmax, centers[0]+radius);
+						ymax = Math.max(ymax, centers[1]+radius);
+						zmax = Math.max(zmax, centers[2]+radius);
 					}
 					boundingVolume.min = [xmin, ymin, zmin];
 					boundingVolume.max = [xmax, ymax, zmax];
 					boundingVolume.center = divideVec(addVec(boundingVolume.max, boundingVolume.min), 2);
 					boundingVolume.diagonal = vecLength(subtractVec(boundingVolume.max, boundingVolume.min));
+					//console.log("BB: ", boundingVolume);
 				}
 				else if(shapeType == 2){					
 					
-					var vertices = model.meshes[0].vertexPositions;
-					for( var i = 0; i < vertices.length; i+=3){
+					var vertices = shapeData;
+					for( var i = 0; i < vertices.length; i+=4){
 						xmin = Math.min(xmin, vertices[i]);
 						ymin = Math.min(ymin, vertices[i+1]);
 						zmin = Math.min(zmin, vertices[i+2]);
@@ -691,16 +691,20 @@ Assignment 1
 				boundingVolume.grid.xResolution = Math.round(boundingVolume.xSize/a);
 				boundingVolume.grid.xResolution = (boundingVolume.grid.xResolution < 1) ? 1 : 
 													( (boundingVolume.grid.xResolution > maxResolution) ? 64 : boundingVolume.grid.xResolution);
-				//boundingVolume.grid.xResolution = 1;
+				//boundingVolume.grid.xResolution = 2;
 				boundingVolume.grid.yResolution = Math.round(boundingVolume.ySize/a);
 				boundingVolume.grid.yResolution = (boundingVolume.grid.yResolution < 1) ? 1 : 
 													( (boundingVolume.grid.yResolution > maxResolution) ? 64 : boundingVolume.grid.yResolution);
-				boundingVolume.grid.yResolution = 1;
+				//boundingVolume.grid.yResolution = 1;
 				boundingVolume.grid.zResolution = Math.round(boundingVolume.zSize/a);
 				boundingVolume.grid.zResolution = (boundingVolume.grid.zResolution < 1) ? 1 : 
 													( (boundingVolume.grid.zResolution > maxResolution) ? 64 : boundingVolume.grid.zResolution);
-				boundingVolume.grid.zResolution = 1;
-				console.log("Resolutions: ",boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution);
+				//boundingVolume.grid.zResolution = 1;
+				//var minResolution = Math.min(boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution);
+				//boundingVolume.grid.xResolution = minResolution;
+				//boundingVolume.grid.yResolution = minResolution;
+				//boundingVolume.grid.zResolution = minResolution;
+				//console.log("Resolutions: ",boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution);
 				boundingVolume.grid.metadata = new Array();
 				boundingVolume.grid.voxels = new Array();
 				boundingVolume.grid.numVoxels = boundingVolume.grid.xResolution * boundingVolume.grid.yResolution * boundingVolume.grid.zResolution;
@@ -711,34 +715,35 @@ Assignment 1
 				
 				if(shapeType == 1){
 				
-					var centers = model.spheres[0].centers;
-					var radii = model.spheres[0].radii;
-					for ( var i = 0; i < centers.length; i+=3){
-						var xmin = centers[i]-radii[i/3];
-						var ymin = centers[i+1]-radii[i/3];
-						var zmin = centers[i+2]-radii[i/3];
+					var spheres = shapeData;
+					for ( var i = 0; i < spheres.length; i+=4){
+						var centers = [spheres[i], spheres[i+1], spheres[i+2]];
+						var radius = spheres[i+3];
+						var xmin = centers[0]-radius;
+						var ymin = centers[1]-radius;
+						var zmin = centers[2]-radius;
 						
-						var xmax = centers[i]+radii[i/3];
-						var ymax = centers[i+1]+radii[i/3];
-						var zmax = centers[i+2]+radii[i/3];
+						var xmax = centers[0]+radius;
+						var ymax = centers[1]+radius;
+						var zmax = centers[2]+radius;
 						
 						var gridMin = gridIndex([xmin, ymin, zmin]);
 						var gridMax = gridIndex([xmax, ymax, zmax]);
 						for(var x = gridMin[0]; x <= gridMax[0]; x++)
 							for(var y = gridMin[1]; y <= gridMax[1]; y++)
 								for(var z = gridMin[2]; z <= gridMax[2]; z++)
-									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/4);
 						
 					}
 				}
 				else if(shapeType == 2){					
 					
-					var vertices = model.meshes[0].vertexPositions;
-					var indices = model.meshes[0].indices;
-					for( var i = 0; i < indices.length; i+=3){
-						var one = indices[i]*3;
-						var two = indices[i+1]*3;
-						var three = indices[i+2]*3;
+					var vertices = shapeData;
+					var indices = shapeIndices;
+					for( var i = 0; i < indices.length; i+=4){
+						var one = indices[i]*4;
+						var two = indices[i+1]*4;
+						var three = indices[i+2]*4;
 						
 						var xmin = Math.min(vertices[one], vertices[two], vertices[three]);
 						var ymin = Math.min(vertices[one+1], vertices[two+1], vertices[three+1]);
@@ -753,7 +758,7 @@ Assignment 1
 						for(var x = gridMin[0]; x <= gridMax[0]; x++)
 							for(var y = gridMin[1]; y <= gridMax[1]; y++)
 								for(var z = gridMin[2]; z <= gridMax[2]; z++)
-									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/4);
 					}
 				}
 				
@@ -768,7 +773,7 @@ Assignment 1
 					boundingVolume.grid.metadataFlat = boundingVolume.grid.metadataFlat.concat(boundingVolume.grid.metadata[i]);
 					boundingVolume.grid.voxelsFlat = boundingVolume.grid.voxelsFlat.concat(boundingVolume.grid.voxels[i]);
 				}
-				console.log(boundingVolume);
+				//console.log(boundingVolume);
 			}
 			
 			function gridIndex(point){
@@ -784,31 +789,118 @@ Assignment 1
 				return [x, y, z];
 			}
 			
-			function loadScene(){
+			function ApplyMatrix(matrix, data){
+				var worldData = new Array();
+				for(var i = 0; i < data.length; i+=3){
+					var d0 = data[i];
+					var d1 = data[i+1];
+					var d2 = data[i+2];
+					
+					var n0 = matrix[0]*d0 + matrix[1]*d1 + matrix[2]*d2 + matrix[3];
+					var n1 = matrix[4]*d0 + matrix[5]*d1 + matrix[6]*d2 + matrix[7];
+					var n2 = matrix[8]*d0 + matrix[9]*d1 + matrix[10]*d2 + matrix[11];
+					var n3 = matrix[12]*d0 + matrix[13]*d1 + matrix[14]*d2 + matrix[15];
+					
+					worldData.push(n0);
+					worldData.push(n1);
+					worldData.push(n2);
+					worldData.push(n3);
+				}
+				return worldData;
+			}
+			
+			function ApplyNormalMatrix(matrix, data){
+				var normalMatrix = new Array();
+				mat4.inverse(matrix, normalMatrix);
+				mat4.transpose(normalMatrix);
+				return ApplyMatrix(normalMatrix, data);
+			}
+			
+			function ApplyOffset(offset, data){
+				var newOffset = new Array();
+				for(var i = 0; i < data.length; i++)
+					newOffset[i] = data[i]+offset;
+				return newOffset;
+			}
+			
+			function loadScene(){	
+
+				for ( x in clBuffers){
+					clBuffers[x].releaseCLResources();
+				}			
+				shapeData = new Array();
+				shapeNormals = new Array();
+				shapeIndices = new Array();
 				
-				
-				var shapeData = new Array();
-				var shapeNormals = new Array();
-				var shapeIndices = new Array();
 				if(model.spheres){
 					shapeType = 1;
-					var j = 0, k = 0;
-					for(var i = 0; i < model.spheres[0].centers.length; i++, k++){
-						if(i > 0 && i % 3 == 0){
-							shapeData[k++] = model.spheres[0].radii[j++];
+					var numNodes = model.nodes.length;
+					var centerData = [""];
+					var radiiData = [""];
+					for(var n = 0; n < numNodes; n++){
+						var numSpheres = model.nodes[n].sphereIndices.length;
+						for(var m = 0; m < numSpheres; m++){
+							var sphereIndex = model.nodes[n].sphereIndices[m];
+							if(model.nodes[n].modelMatrix){
+								centerData = centerData.concat(ApplyMatrix(model.nodes[n].modelMatrix, model.spheres[sphereIndex].centers));
+								radiiData = radiiData.concat(model.spheres[sphereIndex].radii);
+							}
+							else{
+								centerData = centerData.concat(padArray(model.spheres[sphereIndex].centers, 3));
+								radiiData = radiiData.concat(model.spheres[sphereIndex].radii);
+							}
 						}
-						shapeData[k] = model.spheres[0].centers[i];
 					}
-					shapeData[k] = model.spheres[0].radii[j];
+					centerData.shift();
+					radiiData.shift();
+					var j = 0;
+					for(var i = 3; i < centerData.length; i+=4){
+						centerData[i] = radiiData[j++];
+					}
+					shapeData = centerData;
 					shapeNormals[0] = 0;
 					shapeIndices[0] = 0;
 					numShapes = shapeData.length/4;
+					
 				}
 				else if(model.meshes){
 					shapeType = 2;
-					shapeData = padArray(model.meshes[0].vertexPositions, 3);
-					shapeNormals = padArray(model.meshes[0].vertexNormals, 3);
-					shapeIndices = padArray(model.meshes[0].indices, 3);
+					var numNodes = model.nodes.length;
+					var indexOffset = 0;
+					for(var n = 0; n < numNodes; n++){
+						var numMeshes = model.nodes[n].meshIndices.length;
+						for(var m = 0; m < numMeshes; m++){
+							var meshIndex = model.nodes[n].meshIndices[m];
+							if(model.nodes[n].modelMatrix){
+								if(shapeData){
+									shapeData = shapeData.concat(ApplyMatrix(model.nodes[n].modelMatrix, model.meshes[meshIndex].vertexPositions));
+									shapeNormals = shapeNormals.concat(ApplyNormalMatrix(model.nodes[n].modelMatrix, model.meshes[meshIndex].vertexNormals));
+									shapeIndices = shapeIndices.concat(ApplyOffset(indexOffset, model.meshes[meshIndex].indices));
+								}
+								else{
+									shapeData = ApplyMatrix(model.nodes[n].modelMatrix, model.meshes[meshIndex].vertexPositions);
+									shapeNormals = ApplyNormalMatrix(model.nodes[n].modelMatrix, model.meshes[meshIndex].vertexNormals);
+									shapeIndices = model.meshes[meshIndex].indices;
+								}
+							}
+							else{
+						
+								if(shapeData){
+									shapeData = shapeData.concat(padArray(model.meshes[meshIndex].vertexPositions, 3));
+									shapeNormals = shapeNormals.concat(padArray(model.meshes[meshIndex].vertexNormals, 3));
+									shapeIndices = shapeIndices.concat(ApplyOffset(indexOffset, model.meshes[meshIndex].indices));
+								}
+								else{
+									shapeData = padArray(model.meshes[meshIndex].vertexPositions, 3);
+									shapeNormals = padArray(model.meshes[meshIndex].vertexNormals, 3);
+									shapeIndices = model.meshes[meshIndex].indices;
+								}
+							}
+							indexOffset += model.meshes[meshIndex].indices.length;
+						}
+					}
+					//console.log(shapeIndices);
+					shapeIndices = padArray(shapeIndices, 3);
 					numShapes = shapeIndices.length/4;
 				}
 				else{
@@ -858,7 +950,7 @@ Assignment 1
 									boundingVolume.max, [0], 
 									[boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution], [0]);
 				var viewData = viewDimensions.concat(flags, cameraData);
-				console.log(viewDimensions);
+				//console.log(viewData);
 				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
 				clBuffers.gridMetadataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.metadataFlat.length);
 				clBuffers.gridVoxelsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.voxelsFlat.length);

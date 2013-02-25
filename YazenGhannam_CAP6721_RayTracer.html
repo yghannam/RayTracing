@@ -109,7 +109,7 @@ Assignment 1
 			
 			float3 reflect(float3 normal, float3 incident){
 			
-				return normalize( 2 * normal * clamp(dot(normalize(incident), normal), 0.0f, 1.f) - incident);
+				return  2 * (normal * clamp(dot(incident, normal), 0.0f, 1.f) - incident);
 			
 			}
 			
@@ -144,7 +144,7 @@ Assignment 1
 				float tmin = max(txmin, max(tymin, tzmin));
 				float tmax = min(txmax, max(tymax, tzmax));
 					
-				return (tmin < tmax) ? tmin : -1;
+				return (tmin < tmax) ? tmin : INFINITY;
 			}
 			
 			float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W){
@@ -161,7 +161,7 @@ Assignment 1
 				bool isShadowRay, 
 				int shapeType, 
 				int numShapes, 
-				__global float4 *shapeData, 
+				__global float16 *shapeData, 
 				__global float4 *shapeNormals,
 				__global uint4 *shapeIndices){
 				
@@ -173,8 +173,8 @@ Assignment 1
 				if(shapeType == 1){
 					for( i = 0; i < numShapes; i++){
 						Sphere sphere;
-						sphere.c = shapeData[i].xyz;
-						sphere.r = shapeData[i].w;
+						sphere.c = shapeData[i].s012;
+						sphere.r = shapeData[i].s3;
 						float rv = raySphere(ray, sphere);
 						if ( rv < intersection.t ){
 							intersection.t = rv;
@@ -186,14 +186,14 @@ Assignment 1
 						}
 					}
 					intersection.P = ray.o + intersection.t*ray.d;
-					intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].xyz);
+					intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].s012);
 				}
 				else if(shapeType == 2){
 					float alpha, beta;
 					for( i = 0; i < numShapes; i++){
-						float3 p0 = shapeData[shapeIndices[i].x].xyz;
-						float3 p1 = shapeData[shapeIndices[i].y].xyz;
-						float3 p2 = shapeData[shapeIndices[i].z].xyz;
+						float3 p0 = shapeData[shapeIndices[i].x].s012;
+						float3 p1 = shapeData[shapeIndices[i].y].s012;
+						float3 p2 = shapeData[shapeIndices[i].z].s012;
 						float3 rv = rayTriangle(ray, p0, p1, p2);
 						if ( rv.x < intersection.t ){
 							intersection.t = rv.x;
@@ -222,7 +222,7 @@ Assignment 1
 				int voxelIndex,
 				__global int *gridMetadata,
 				__global int *gridVoxels,
-				__global float4 *shapeData, 
+				__global float16 *shapeData, 
 				__global float4 *shapeNormals,
 				__global uint4 *shapeIndices){
 				
@@ -239,8 +239,8 @@ Assignment 1
 					if(shapeType == 1){
 						for( i = 0; i < numShapes; i++){
 							Sphere sphere;
-							sphere.c = shapeData[gridVoxels[offset+i]].xyz;
-							sphere.r = shapeData[gridVoxels[offset+i]].w;
+							sphere.c = shapeData[gridVoxels[offset+i]].s012;
+							sphere.r = shapeData[gridVoxels[offset+i]].s3;
 							float rv = raySphere(ray, sphere);
 							if ( rv < intersection.t ){
 								intersection.t = rv;
@@ -252,14 +252,14 @@ Assignment 1
 							}
 						}
 						intersection.P = ray.o + intersection.t*ray.d;
-						intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].xyz);
+						intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].s012);
 					}
 					else if(shapeType == 2){
 						float alpha, beta;
 						for( i = 0; i < numShapes; i++){
-							float3 p0 = shapeData[shapeIndices[gridVoxels[offset+i]].x].xyz;
-							float3 p1 = shapeData[shapeIndices[gridVoxels[offset+i]].y].xyz;
-							float3 p2 = shapeData[shapeIndices[gridVoxels[offset+i]].z].xyz;
+							float3 p0 = shapeData[shapeIndices[gridVoxels[offset+i]].x].s012;
+							float3 p1 = shapeData[shapeIndices[gridVoxels[offset+i]].y].s012;
+							float3 p2 = shapeData[shapeIndices[gridVoxels[offset+i]].z].s012;
 							float3 rv = rayTriangle(ray, p0, p1, p2);
 							if ( rv.x < intersection.t ){
 								intersection.t = rv.x;
@@ -288,17 +288,40 @@ Assignment 1
 								(int)clamp( round((point.z-boundMin.z)/boundSize.z), 0.f, gridRes.z-1.f));			
 			}
 			
+			bool isLightInShape(Intersection intersection, __global float16* shapeData, Sphere L){
+				return all(isless(L.c, shapeData[intersection.shapeIndex].s012+shapeData[intersection.shapeIndex].s3)) 
+					&& all(isgreater(L.c, shapeData[intersection.shapeIndex].s012-shapeData[intersection.shapeIndex].s3)) ;
+			}
+			
+			float random(unsigned int *seed0, unsigned int *seed1) 
+			{
+				*seed0 = 36969 * ((*seed0) & 65535) + ((*seed0) >> 16);
+				*seed1 = 18000 * ((*seed1) & 65535) + ((*seed1) >> 16);
+
+				unsigned int ires = ((*seed0) << 16) + (*seed1);
+
+				//Convert to float
+				union {
+					float f;
+					unsigned int ui;
+				} res;
+				res.ui = (ires & 0x007fffff) | 0x40000000;
+
+				return (res.f - 2.f) / 2.f;
+			}
+			
 			__kernel void getPixelColor(
 				const int shapeType,
 				const int numShapes,
 				__global float4 *viewData,
-				__global float4 *shapeData,
+				__global float16 *shapeData,
 				__global float4 *shapeNormals,
 				__global uint4 *shapeIndices,
 				__global int *gridMetadata,
 				__global int *gridVoxels,
 				__global uchar4 *raster,
-				__global float4 *debug){
+				__global unsigned int *seeds,
+				__global float16 *debug){
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
 					
@@ -321,7 +344,8 @@ Assignment 1
 					
 					int numIter = 0;
 					int3 gridI = (int3)(0,0,0);
-
+					
+					
 					
 					//float enableDiffuse = viewData[7].x;
 					//float enableSpecular = viewData[7].x;
@@ -329,33 +353,47 @@ Assignment 1
 					//float enableInterreflection = viewData[7].x;
 					bool accelerated = (flags.x == 1.0f);
 					
+					unsigned int s1 = seeds[col];
+					unsigned int s2 = seeds[row];
+					float r1 = random(&s1, &s2);
+					float r2 = random(&s1, &s2);
+
 					float3 localDirection;
-					localDirection.x = width * ( (col+0.5f)/columns - 0.5f);
-					localDirection.y = height * (0.5f - (row+0.5f)/rows);
+					localDirection.x = width * ( (r1+col+0.5f)/columns - 0.5f);
+					localDirection.y = height * (0.5f - (r2+row+0.5f)/rows);
 					localDirection.z = -1.f;					
 					
 					Ray worldRay;
 					worldRay.o = eye;
 					worldRay.d = transformRayDirection(localDirection, U, V, W);
 					
-					for(int i = 0; i < 4; i++)
-						debug[i] = (float4)(0,0,0,0);
-					debug[0] = flags;
+					// for(int i = 0; i < numShapes; i++)
+						// debug[i] = shapeData[i];//(float4)(0,0,0,0);
+					//debug[0] = shapeData[i];
 					
 					uchar4 color = (uchar4)(0, 128, 0, 255);
 					
 					float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
-					if( tmin > 0){
+					if( tmin < INFINITY ){
 					
 						Intersection intersection;
 						
-						float3 L = (float3)(1.f,1.f,-1.f);
 						
-						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
+						Sphere lightSource;// = (float3)(50.f, 50.6f, 81.6f);
+						float4 lightIntensity;// = (float4)(1.f, 1.f, 1.f, 1.f);
+						
+						for(int i = 0; i < numShapes; i++){
+							if(shapeData[i].s5 == 1){
+								lightSource.c = shapeData[i].s012;
+								lightSource.r = shapeData[i].s3;
+								lightIntensity = shapeData[i].scdef;
+							}
+						}
 						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
 						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
 						float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
 						float shininess = 10;
+						float4 radiance = (float4)(0, 0, 0, 0);
 						
 						float epsilon = pow(10.f, -2.f);
 						
@@ -378,7 +416,7 @@ Assignment 1
 							
 							
 							bool intersected = false;
-							float tCurrent = tmin;//max(0.f, tmin);
+							float tCurrent = max(0.f, tmin);
 							float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
 							int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
 							float dX = boundSize.x / gridRes.x;
@@ -426,45 +464,115 @@ Assignment 1
 							gridI = gridCoord;
 							
 						}
-						else{						
-							intersection 
-								= intersect(worldRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);								
-						}
-						if (intersection.t < INFINITY){
-							/*
-							Ray shadowRay;
-							shadowRay.o = intersection.P + epsilon;
-							shadowRay.d = L;
-							Intersection shadowIntersection 
-								= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
-							Ray reflectedRay;
-							reflectedRay.o = intersection.P + epsilon;
-							reflectedRay.d = reflect(intersection.N, -intersection.P);
-							Intersection reflectedIntersection 
-								= intersect(reflectedRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+						else{
+							Ray ray;
+							ray.o = worldRay.o;
+							ray.d = worldRay.d;
 							
-							float4 diffuse 
-								= (shadowIntersection.t < INFINITY) ?  
-									(float4)(0,0,0,0) : (kd * clamp(dot(intersection.N, normalize(L)), 0.0f, 1.f));
-							if(reflectedIntersection.t < INFINITY){
-								Ray reflectedShadowRay;
-								reflectedShadowRay.o = reflectedIntersection.P + epsilon;
-								reflectedShadowRay.d = L;
-								Intersection reflectedShadowIntersection 
-									= intersect(reflectedShadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
-								if(reflectedShadowIntersection.t < INFINITY){
-									float4 reflectedDiffuse = kd * clamp(dot(reflectedIntersection.N, normalize(L)), 0.0f, 1.f);
-									diffuse = (1.f - ks) * diffuse + ks * reflectedDiffuse;
+							float4 reflectance = (float4)(1, 1, 1, 1);
+							for(int i = 0; i < 2; i++){
+								intersection 
+									= intersect(ray, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);	
+								if (intersection.t < INFINITY){
+							
+									// Reverse Normal if Light Source is within Shape
+									if(isLightInShape(intersection, shapeData, lightSource))
+										intersection.N = -intersection.N;
+									
+									Ray shadowRay;
+									shadowRay.o = intersection.P + epsilon;
+									shadowRay.d = lightSource.c-intersection.P;
+									Intersection shadowIntersection 
+										= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+									float tLight = raySphere(shadowRay, lightSource);//(L-shadowRay.o).x/shadowRay.d.x;							
+									
+									float4 materialFlags = shapeData[intersection.shapeIndex].s4567;
+									
+									
+									
+										
+										// Diffuse Reflectance
+										if(materialFlags.x == 1){
+											if(shadowIntersection.t >= tLight){
+												reflectance *= shapeData[intersection.shapeIndex].s89ab;
+												radiance +=  reflectance * clamp(dot(intersection.N, normalize(lightSource.c-intersection.P)), 0.0f, 1.f);
+											}
+											
+											//ray.d = reflect(intersection.N, normalize(ray.o-intersection.P));
+											//ray.o = intersection.P + epsilon;
+										}
+										
+										// Emittance
+										if(materialFlags.y == 1){
+											radiance += shapeData[intersection.shapeIndex].scdef;
+											break; // Break ray path
+										}
+										
+										// Specular Reflectance
+										if(materialFlags.z == 1){
+											if(shadowIntersection.t >= tLight){
+												float3 View = normalize( -ray.d);
+												float3 R = reflect(intersection.N, normalize(lightSource.c-intersection.P));	
+												reflectance *= shapeData[intersection.shapeIndex].s89ab;
+												radiance += reflectance * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+											}
+											
+											ray.d = reflect(intersection.N, normalize(ray.o-intersection.P));
+											ray.o = intersection.P + epsilon;
+										}
+										
+										// Refractive Index / Specular Transmittance
+										if(materialFlags.z != 0){
+											if(shadowIntersection.t >= tLight){
+												radiance += 0;
+											}
+											
+											float refractiveIndex = shapeData[intersection.shapeIndex].s7;
+											float4 specularTransmittance = shapeData[intersection.shapeIndex].scdef;
+											
+											float interiorRefractiveRatio = 1.f/refractiveIndex;
+											float cosI = clamp(dot(normalize(ray.d), intersection.N), 0.f, 1.f);
+											float sinT2 = interiorRefractiveRatio * interiorRefractiveRatio * (1.f - cosI * cosI);
+											if ( sinT2 > 1.f)
+												break;
+											
+											Ray interiorRefractedRay;
+											interiorRefractedRay.o = intersection.P;
+											interiorRefractedRay.d = interiorRefractiveRatio * normalize(ray.d) - ( interiorRefractiveRatio + sqrt(1.f - sinT2)) * intersection.N;
+											
+											Intersection refractedIntersection;
+											Sphere current;
+											current.c = shapeData[intersection.shapeIndex].s012;
+											current.r = shapeData[intersection.shapeIndex].s3;
+											refractedIntersection.t = raySphere(interiorRefractedRay, current);
+											refractedIntersection.P = intersection.P + refractedIntersection.t * interiorRefractedRay.d;
+											refractedIntersection.N = refractedIntersection.P - current.c;
+											reflectance *= specularTransmittance;
+											
+											
+											cosI = clamp(dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
+											sinT2 = refractiveIndex * refractiveIndex * (1.f - cosI * cosI);
+											if ( sinT2 > 1.f)
+												break;
+											
+											
+											ray.o = refractedIntersection.P;
+											ray.d = refractiveIndex * normalize(interiorRefractedRay.d) - ( refractiveIndex + sqrt(1.f - sinT2)) * refractedIntersection.N;
+											
+										}
+										
+									
+									
 								}
-							}	
-							*/
-								float4 diffuse = (kd * clamp(dot(intersection.N, normalize(L)), 0.0f, 1.f));
-								//float3 View = normalize( -worldRay.d);
-								//float3 R = reflect(intersection.N, L);								
-								float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
-								//TODO: Ambient Lighting
-								float4 ambient = 0;//ka * lightIntensity;
-								float4 Intensity = lightIntensity * (diffuse + specular + ambient);
+								else
+									break;
+							}
+							
+								//debug[0] = (float16)(intersection.P, -5);
+								//debug[1] = (float4)(intersection.N, -10);
+								
+								
+								float4 Intensity = clamp(radiance, 0.0f, 1.f);
 										
 								uchar red = (uchar) round(255*Intensity.x);
 								uchar green = (uchar) round(255*Intensity.y);
@@ -473,7 +581,9 @@ Assignment 1
 							}
 						}
 					gridI *= 255/4;
-					raster[row * columns + col] = (uchar4)(numIter*255/4 , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
+					for(int i = 0; i < numShapes; i++)
+						debug[i] = shapeData[i];
+					raster[row * columns + col] = raster[row * columns + col] / 2 + color / 2;//(uchar4)(color.x , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
 				}
 		</script>
 		<script type="text/javascript">
@@ -501,9 +611,10 @@ Assignment 1
 			var camera = new Object();
 			var rotate = false;
 			var sceneLoaded = false;
-			var acceleration = 1.0;
+			var acceleration = 0;
 			var localWS = null;
 			var globalWS = null;
+			var seeds;
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -616,12 +727,19 @@ Assignment 1
 			
 				//console.log(cameraData);
 			
+			}
+			
+			function updateScene(){
+				for(var i = 0; i < canvas.width*canvas.height; i++){
+					seeds[i] = Math.floor(Math.random()*37000);
+				}
+				
+				clCQ.enqueueWriteBuffer(clBuffers.seedsBuffer, true, 0, 4*seeds.length, seeds, []);
 				var startTime = new Date().getTime();
-				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
 				var endTime = new Date().getTime();
-				console.log("Compute time: "+(endTime-startTime));	
+				//console.log("Compute time: "+(endTime-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 			}
@@ -640,7 +758,7 @@ Assignment 1
 				if(shapeType == 1){
 				
 					var spheres = shapeData;
-					for ( var i = 0; i < spheres.length; i+=4){
+					for ( var i = 0; i < spheres.length; i+=16){
 						var centers = [spheres[i], spheres[i+1], spheres[i+2]];
 						var radius = spheres[i+3];
 						xmin = Math.min(xmin, centers[0]-radius);
@@ -716,7 +834,7 @@ Assignment 1
 				if(shapeType == 1){
 				
 					var spheres = shapeData;
-					for ( var i = 0; i < spheres.length; i+=4){
+					for ( var i = 0; i < spheres.length; i+=16){
 						var centers = [spheres[i], spheres[i+1], spheres[i+2]];
 						var radius = spheres[i+3];
 						var xmin = centers[0]-radius;
@@ -831,6 +949,9 @@ Assignment 1
 				shapeData = new Array();
 				shapeNormals = new Array();
 				shapeIndices = new Array();
+				shapeMaterials = new Array();
+				materialMetadata = new Array();
+				materials = new Array();
 				
 				if(model.spheres){
 					shapeType = 1;
@@ -841,26 +962,102 @@ Assignment 1
 						var numSpheres = model.nodes[n].sphereIndices.length;
 						for(var m = 0; m < numSpheres; m++){
 							var sphereIndex = model.nodes[n].sphereIndices[m];
+							var center;
 							if(model.nodes[n].modelMatrix){
-								centerData = centerData.concat(ApplyMatrix(model.nodes[n].modelMatrix, model.spheres[sphereIndex].centers));
-								radiiData = radiiData.concat(model.spheres[sphereIndex].radii);
+								center = ApplyMatrix(model.nodes[n].modelMatrix, model.spheres[sphereIndex].centers);
 							}
 							else{
-								centerData = centerData.concat(padArray(model.spheres[sphereIndex].centers, 3));
-								radiiData = radiiData.concat(model.spheres[sphereIndex].radii);
+								center = model.spheres[sphereIndex].centers;
 							}
+							
+							shapeData.push(center[0]);
+							shapeData.push(center[1]);
+							shapeData.push(center[2]);
+							shapeData.push(model.spheres[sphereIndex].radii[0]);
+							
+							var materialIndex = model.spheres[sphereIndex].materialIndex;
+							
+							if(model.materials[materialIndex].diffuseReflectance)
+								shapeData.push(1);
+							else
+								shapeData.push(0);
+								
+							if(model.materials[materialIndex].emittance)
+								shapeData.push(1);
+							else
+								shapeData.push(0);
+								
+							if(model.materials[materialIndex].specularReflectance)
+								shapeData.push(1);
+							else
+								shapeData.push(0);
+								
+							if(model.materials[materialIndex].specularTransmittance)
+								shapeData.push(model.materials[materialIndex].refractiveIndex);
+							else
+								shapeData.push(0);
+								
+							if(model.materials[materialIndex].diffuseReflectance){
+								shapeData.push(model.materials[materialIndex].diffuseReflectance[0]);
+								shapeData.push(model.materials[materialIndex].diffuseReflectance[1]);
+								shapeData.push(model.materials[materialIndex].diffuseReflectance[2]);
+								shapeData.push(1);
+							}
+							else if(model.materials[materialIndex].specularReflectance){
+								shapeData.push(model.materials[materialIndex].specularReflectance[0]);
+								shapeData.push(model.materials[materialIndex].specularReflectance[1]);
+								shapeData.push(model.materials[materialIndex].specularReflectance[2]);
+								shapeData.push(1);
+							}
+							else{
+								shapeData.push(0);
+								shapeData.push(0);
+								shapeData.push(0);
+								shapeData.push(0);
+							}	
+							
+							if(model.materials[materialIndex].emittance){
+								shapeData.push(model.materials[materialIndex].emittance[0]);
+								shapeData.push(model.materials[materialIndex].emittance[1]);
+								shapeData.push(model.materials[materialIndex].emittance[2]);
+								shapeData.push(1);
+							}
+							else if(model.materials[materialIndex].specularTransmittance){
+								shapeData.push(model.materials[materialIndex].specularTransmittance[0]);
+								shapeData.push(model.materials[materialIndex].specularTransmittance[1]);
+								shapeData.push(model.materials[materialIndex].specularTransmittance[2]);
+								shapeData.push(1);
+							}
+							else{
+								shapeData.push(0);
+								shapeData.push(0);
+								shapeData.push(0);
+								shapeData.push(0);
+							}							
+							
+								
 						}
 					}
 					centerData.shift();
 					radiiData.shift();
-					var j = 0;
-					for(var i = 3; i < centerData.length; i+=4){
-						centerData[i] = radiiData[j++];
-					}
-					shapeData = centerData;
+					//var j = 0;
+					//for(var i = 3; i < centerData.length; i+=4){
+					//	centerData[i] = radiiData[j++];
+					//}
+					//shapeData = centerData;
+					
+					//for(var i = 0; i < model.nodes[n].sphereIndices.length; i++){
+						//shapeData.push(centerData[i*3]);
+						//shapeData.push(centerData[i*3+1]);
+						//shapeData.push(centerData[i*3+2]);
+						//shapeData.push(radiiData[i]);
+						//if(model.materials[model.nodes[
+					//}
+					
 					shapeNormals[0] = 0;
 					shapeIndices[0] = 0;
-					numShapes = shapeData.length/4;
+					numShapes = shapeData.length/16;
+					console.log(shapeData);
 					
 				}
 				else if(model.meshes){
@@ -908,6 +1105,10 @@ Assignment 1
 				}
 				//console.log(shapeIndices);
 				//var sphereCenters = padArray(model.spheres[0].centers, 3);
+				
+				
+				//console.log(shapeMaterials, materialMetadata, materials);
+				
 				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
 				clBuffers.shapeNormalsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeNormals.length);
 				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
@@ -955,6 +1156,12 @@ Assignment 1
 				clBuffers.gridMetadataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.metadataFlat.length);
 				clBuffers.gridVoxelsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.voxelsFlat.length);
 				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*canvas.width*canvas.height);
+				
+				seeds = new Uint32Array(canvas.width*canvas.height);
+				for(var i = 0; i < canvas.width*canvas.height; i++){
+					seeds[i] = Math.floor(Math.random()*65000);
+				}
+				clBuffers.seedsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*seeds.length);
 				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
 
 				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
@@ -967,7 +1174,8 @@ Assignment 1
 				clKernels.colorKernel.setKernelArg(6, clBuffers.gridMetadataBuffer);
 				clKernels.colorKernel.setKernelArg(7, clBuffers.gridVoxelsBuffer);
 				clKernels.colorKernel.setKernelArg(8, clBuffers.rasterBuffer);
-				clKernels.colorKernel.setKernelArg(9, clBuffers.debugBuffer);
+				clKernels.colorKernel.setKernelArg(9, clBuffers.seedsBuffer);
+				clKernels.colorKernel.setKernelArg(10, clBuffers.debugBuffer);
 				//console.log(device);
 				wsSize = clKernels.colorKernel.getKernelWorkGroupInfo(device, WebCL.CL_KERNEL_WORK_GROUP_SIZE);
 				xSize = Math.floor(Math.sqrt(wsSize)); 
@@ -985,22 +1193,23 @@ Assignment 1
 				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
 				clCQ.enqueueWriteBuffer(clBuffers.gridMetadataBuffer, true, 0, 4*boundingVolume.grid.metadataFlat.length, new Uint32Array(boundingVolume.grid.metadataFlat), []);
 				clCQ.enqueueWriteBuffer(clBuffers.gridVoxelsBuffer, true, 0, 4*boundingVolume.grid.voxelsFlat.length, new Uint32Array(boundingVolume.grid.voxelsFlat), []);
+				clCQ.enqueueWriteBuffer(clBuffers.seedsBuffer, true, 0, 4*seeds.length, seeds, []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
-				console.log("Compute time: "+(new Date().getTime()-startTime));	
+				//console.log("Compute time: "+(new Date().getTime()-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
 				
-				//var debug = new Float32Array(16);
-				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
-				//console.log(debug);
+				var debug = new Float32Array(shapeData.length);
+				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*shapeData.length, debug, []);	
+				console.log(debug);
 					
 			}
 			
 			function main(){
 				document.getElementById("inputFile").value = "";
-				document.getElementById("acceleration").checked = true;
+				document.getElementById("acceleration").checked = false;
 								
 				try{
 					canvas = document.getElementById("myCanvas");
@@ -1022,8 +1231,11 @@ Assignment 1
 					var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
 					(function callback(){
 						requestAnimationFrame(callback);
-						if(sceneLoaded && rotate)
-							updateCamera();
+						if(sceneLoaded){
+							if(rotate)
+								updateCamera();
+							updateScene();
+						}
 					})();
 					//console.log(clBuffers);
 				}catch(e){

@@ -5,13 +5,13 @@
 		"diffuseReflectance":[0.75, 0.25, 0.25]
 	},
 	{
-		"diffuseReflectance":[0.25, 0.25, 0.25]
+		"diffuseReflectance":[0.25, 0.25, 0.75]
 	},
 	{
 		"diffuseReflectance":[0.75, 0.75, 0.75]
 	},
 	{
-		"diffuseReflectance":[0.0, 0.0, 0.0]
+		"diffuseReflectance":[0.0, 0.75, 0.0]
 	},
 	{
 		"diffuseReflectance":[0.75, 0.75, 0.75]

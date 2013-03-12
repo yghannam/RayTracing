@@ -11,6 +11,10 @@ Assignment 1
 		<meta content="utf-8" http-equiv="encoding">
 		<script type="text/javascript" src="gl-matrix.js"></script>
 		<script id="openclProgram" type="text/x-opencl">
+			
+			#define Pi 3.14159265358979323846f
+			#define EPSILON 0.01
+			
 			typedef struct {
 				float3 d, o;
 			}Ray;
@@ -77,7 +81,8 @@ Assignment 1
 			}
 			float raySphere(
 				Ray ray, 
-				Sphere sphere){
+				Sphere sphere,
+				bool second){
 				float t = INFINITY;
 				float a = dot(ray.d, ray.d);
 				float b = 2.0f * dot(ray.o - sphere.c ,ray.d);
@@ -92,24 +97,26 @@ Assignment 1
 					float x1 = q/a;
 					float x2 = c/q;
 					if(x1 > 0 && x2 > 0){
-						t = (x1 < x2) ? x1:x2;
+						if(second)
+							return (x1 > x2) ? x1:x2;
+						return (x1 < x2) ? x1:x2;
 					}
 					else if (x1 > 0 && x2 <= 0){
-						t = x1;
+						return x1;
 					}
 					else if (x1 <= 0 && x2 > 0){
-						t = x2;
+						return x2;
 					}
 					else{
-						t = INFINITY;
+						return INFINITY;
 					}
 				}
-				return t;
+				//return t;
 			}
 			
 			float3 reflect(float3 normal, float3 incident){
 			
-				return  2 * (normal * clamp(dot(incident, normal), 0.0f, 1.f) - incident);
+				return  2 * normal * clamp(dot(normalize(incident), normal), 0.0f, 1.f) - normalize(incident);
 			
 			}
 			
@@ -175,8 +182,8 @@ Assignment 1
 						Sphere sphere;
 						sphere.c = shapeData[i].s012;
 						sphere.r = shapeData[i].s3;
-						float rv = raySphere(ray, sphere);
-						if ( rv < intersection.t ){
+						float rv = raySphere(ray, sphere, false);
+						if ( rv < intersection.t && rv > EPSILON){
 							intersection.t = rv;
 							intersection.shapeIndex = i;
 							
@@ -195,7 +202,7 @@ Assignment 1
 						float3 p1 = shapeData[shapeIndices[i].y].s012;
 						float3 p2 = shapeData[shapeIndices[i].z].s012;
 						float3 rv = rayTriangle(ray, p0, p1, p2);
-						if ( rv.x < intersection.t ){
+						if ( rv.x < intersection.t  && rv.x > EPSILON){
 							intersection.t = rv.x;
 							alpha = rv.y;
 							beta = rv.z;
@@ -241,7 +248,7 @@ Assignment 1
 							Sphere sphere;
 							sphere.c = shapeData[gridVoxels[offset+i]].s012;
 							sphere.r = shapeData[gridVoxels[offset+i]].s3;
-							float rv = raySphere(ray, sphere);
+							float rv = raySphere(ray, sphere, false);
 							if ( rv < intersection.t ){
 								intersection.t = rv;
 								intersection.shapeIndex = gridVoxels[offset+i];
@@ -310,6 +317,20 @@ Assignment 1
 				return (res.f - 2.f) / 2.f;
 			}
 			
+			float calcRho(float cosI, float cosT, float n1, float n2){
+				float rPara = (n2 * cosI - n1 * cosT) / (n2 * cosI + n1 * cosT);
+				float rPerp = (n1 * cosI - n2 * cosT) / (n1 * cosI + n2 * cosT);
+				
+				return (rPara * rPara + rPerp * rPerp)/2.f;			
+			}
+			__kernel void clearRaster(
+				const int columns,
+				__global uchar4 *raster){
+					const int col = get_global_id(0);
+					const int row = get_global_id(1);
+					raster[row * columns + col] = (uchar4)(0,0,0,255);
+				}
+			
 			__kernel void getPixelColor(
 				const int shapeType,
 				const int numShapes,
@@ -321,7 +342,9 @@ Assignment 1
 				__global int *gridVoxels,
 				__global uchar4 *raster,
 				__global unsigned int *seeds,
+				__global unsigned int *counters,
 				__global float16 *debug){
+				
 					const int col = get_global_id(0);
 					const int row = get_global_id(1);
 					
@@ -353,14 +376,14 @@ Assignment 1
 					//float enableInterreflection = viewData[7].x;
 					bool accelerated = (flags.x == 1.0f);
 					
-					unsigned int s1 = seeds[col];
-					unsigned int s2 = seeds[row];
+					unsigned int s1 = seeds[2*col];
+					unsigned int s2 = seeds[2*col+1];
 					float r1 = random(&s1, &s2);
 					float r2 = random(&s1, &s2);
 
 					float3 localDirection;
-					localDirection.x = width * ( (r1+col+0.5f)/columns - 0.5f);
-					localDirection.y = height * (0.5f - (r2+row+0.5f)/rows);
+					localDirection.x = width * ( (r1+col)/columns - 0.5f);
+					localDirection.y = height * (0.5f - (r2+row)/rows);
 					localDirection.z = -1.f;					
 					
 					Ray worldRay;
@@ -380,23 +403,23 @@ Assignment 1
 						
 						
 						Sphere lightSource;// = (float3)(50.f, 50.6f, 81.6f);
-						float4 lightIntensity;// = (float4)(1.f, 1.f, 1.f, 1.f);
+						float3 lightIntensity = (float3)(1.f, 1.f, 1.f);
+						float lightArea = 0;
 						
 						for(int i = 0; i < numShapes; i++){
 							if(shapeData[i].s5 == 1){
 								lightSource.c = shapeData[i].s012;
 								lightSource.r = shapeData[i].s3;
-								lightIntensity = shapeData[i].scdef;
+								lightIntensity = shapeData[i].scde;
+								lightArea = 4.f * Pi * lightSource.r * lightSource.r;
 							}
 						}
 						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
 						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
 						float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
 						float shininess = 10;
-						float4 radiance = (float4)(0, 0, 0, 0);
-						
-						float epsilon = pow(10.f, -2.f);
-						
+						float3 radiance = (float3)(0, 0, 0);
+												
 						
 						if(accelerated){					
 							
@@ -469,8 +492,8 @@ Assignment 1
 							ray.o = worldRay.o;
 							ray.d = worldRay.d;
 							
-							float4 reflectance = (float4)(1, 1, 1, 1);
-							for(int i = 0; i < 2; i++){
+							float3 reflectance = (float3)(1, 1, 1);
+							for(int i = 0; i < 6; i++){
 								intersection 
 									= intersect(ray, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);	
 								if (intersection.t < INFINITY){
@@ -480,110 +503,187 @@ Assignment 1
 										intersection.N = -intersection.N;
 									
 									Ray shadowRay;
-									shadowRay.o = intersection.P + epsilon;
+									shadowRay.o = intersection.P;
 									shadowRay.d = lightSource.c-intersection.P;
 									Intersection shadowIntersection 
 										= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
-									float tLight = raySphere(shadowRay, lightSource);//(L-shadowRay.o).x/shadowRay.d.x;							
+									float tLight = raySphere(shadowRay, lightSource, false);//(L-shadowRay.o).x/shadowRay.d.x;							
 									
+									float3 lightDir = lightSource.c-intersection.P;
+									float lightDirLength = length(lightDir);
+									float invPiR2 = 1.f/(Pi * lightDirLength * lightDirLength);
 									float4 materialFlags = shapeData[intersection.shapeIndex].s4567;
 									
+									// Diffuse Reflectance
+									if(materialFlags.x == 1){
 									
-									
-										
-										// Diffuse Reflectance
-										if(materialFlags.x == 1){
-											if(shadowIntersection.t >= tLight){
-												reflectance *= shapeData[intersection.shapeIndex].s89ab;
-												radiance +=  reflectance * clamp(dot(intersection.N, normalize(lightSource.c-intersection.P)), 0.0f, 1.f);
-											}
-											
-											//ray.d = reflect(intersection.N, normalize(ray.o-intersection.P));
-											//ray.o = intersection.P + epsilon;
+										// Direct Illumination
+										if(shadowIntersection.t >= tLight){
+											reflectance *= shapeData[intersection.shapeIndex].s89a;
+											radiance +=  reflectance * lightIntensity * lightArea * invPiR2 * clamp(dot(intersection.N, normalize(lightDir)), 0.0f, 1.f);
 										}
 										
-										// Emittance
-										if(materialFlags.y == 1){
-											radiance += shapeData[intersection.shapeIndex].scdef;
-											break; // Break ray path
+										// TODO: Diffuse Random Sample
+										// Get Random Sample on Unit Hemisphere
+										// Create local coordinate frame for intersection
+										// Transform sample to global coordinate frame
+										
+										// Start with Normal, find smallest absolute component make it 1
+										// Cross product with Normal and New vector e.g. N x (N.x, N.y, 1)
+										// W = N, U = (N.x, N.y, 1), V = W x U
+										float3 temp = intersection.N;
+										if(fabs(temp.x) < fabs(temp.y) && fabs(temp.x) < fabs(temp.z))
+											temp.x = 1;
+										else if(fabs(temp.y) < fabs(temp.x) && fabs(temp.y) < fabs(temp.z))
+											temp.y = 1;
+										else
+											temp.z = 1;
+										float3 Wn = intersection.N;
+										float3 Un = normalize(cross(temp, Wn));;
+										float3 Vn = cross(Wn, Un);
+										
+										float3 sampleDir;
+										sampleDir.z = random(&s1, &s2);
+										float phi = 2.f * Pi * random(&s1, &s2);
+										float r = sqrt(1.f - sampleDir.z*sampleDir.z);
+										sampleDir.x = r * cos(phi);
+										sampleDir.y = r * sin(phi);
+										ray.d.x = sampleDir.x * Un.x + sampleDir.y * Vn.x + sampleDir.z * Wn.x;
+										ray.d.y = sampleDir.x * Un.y + sampleDir.y * Vn.y + sampleDir.z * Wn.y;
+										ray.d.z = sampleDir.x * Un.z + sampleDir.y * Vn.z + sampleDir.z * Wn.z;
+										ray.o = intersection.P;
+									}
+									
+									// Emittance
+									if(materialFlags.y == 1){
+										radiance += shapeData[intersection.shapeIndex].scde;
+										break; // Break ray path
+									}
+									
+									
+									// Use Fresnel to calculate probability and select reflectance or transmission
+									////Specular Reflectance
+									// if(materialFlags.z == 1){
+										
+										////Direct Illumination
+										// if(shadowIntersection.t >= tLight){
+											// float3 View = normalize( -ray.d);
+											// float3 R = reflect(intersection.N, lightDir);	
+											// reflectance *= shapeData[intersection.shapeIndex].s89a;
+											// radiance += reflectance * invPiR2 * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+										// }
+										
+										// ray.d = reflect(intersection.N, ray.o-intersection.P);
+										// ray.o = intersection.P;
+										// continue;
+									// }
+									
+									// Refractive Index / Specular Transmittance
+									if(materialFlags.w != 0){
+										//radiance += (float3)(0.f, 0.f, 1.f);
+										
+										float refractiveIndex = 1.9f;//1.9f;//shapeData[intersection.shapeIndex].s7;
+										float3 specularTransmittance = (float3)(0.9f, 0.9f, 0.9f);//shapeData[intersection.shapeIndex].scde;
+										
+										float interiorRefractiveRatio = 1.f/refractiveIndex;
+										float cosI = clamp(dot(normalize(-ray.d), intersection.N), 0.f, 1.f);
+										//if(cosI > 0.f && cosI < 1.f)
+											//radiance = (float3)(0.f, 1.f, 0.f);
+										float sinT2 = interiorRefractiveRatio * interiorRefractiveRatio * (1.f - cosI * cosI);
+										if (sinT2 > 1.f){
+											//radiance = (float3)(0.f, 1.f, 1.f);
+											break;
 										}
 										
-										// Specular Reflectance
-										if(materialFlags.z == 1){
+										Ray interiorRefractedRay;
+										interiorRefractedRay.o = intersection.P;
+										interiorRefractedRay.d = interiorRefractiveRatio * normalize(ray.d) - ( interiorRefractiveRatio * cosI + sqrt(1.f - sinT2)) * intersection.N;
+										
+										float cosT = clamp(dot(-intersection.N, interiorRefractedRay.d), 0.f, 1.f);
+										float rho = calcRho(cosI, cosT, 1.f, refractiveIndex);
+										
+										// Reflect
+										if(random(&s1, &s2) < rho){
+											// Direct Illumination
 											if(shadowIntersection.t >= tLight){
 												float3 View = normalize( -ray.d);
-												float3 R = reflect(intersection.N, normalize(lightSource.c-intersection.P));	
-												reflectance *= shapeData[intersection.shapeIndex].s89ab;
-												radiance += reflectance * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+												float3 R = reflect(intersection.N, lightDir);	
+												reflectance *= shapeData[intersection.shapeIndex].s89a;
+												radiance += reflectance * invPiR2 * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
 											}
 											
-											ray.d = reflect(intersection.N, normalize(ray.o-intersection.P));
-											ray.o = intersection.P + epsilon;
+											ray.d = reflect(intersection.N, ray.o-intersection.P);
+											ray.o = intersection.P;
 										}
 										
-										// Refractive Index / Specular Transmittance
-										if(materialFlags.z != 0){
-											if(shadowIntersection.t >= tLight){
-												radiance += 0;
-											}
-											
-											float refractiveIndex = shapeData[intersection.shapeIndex].s7;
-											float4 specularTransmittance = shapeData[intersection.shapeIndex].scdef;
-											
-											float interiorRefractiveRatio = 1.f/refractiveIndex;
-											float cosI = clamp(dot(normalize(ray.d), intersection.N), 0.f, 1.f);
-											float sinT2 = interiorRefractiveRatio * interiorRefractiveRatio * (1.f - cosI * cosI);
-											if ( sinT2 > 1.f)
-												break;
-											
-											Ray interiorRefractedRay;
-											interiorRefractedRay.o = intersection.P;
-											interiorRefractedRay.d = interiorRefractiveRatio * normalize(ray.d) - ( interiorRefractiveRatio + sqrt(1.f - sinT2)) * intersection.N;
-											
+										// Refract
+										else{
+										
 											Intersection refractedIntersection;
 											Sphere current;
 											current.c = shapeData[intersection.shapeIndex].s012;
 											current.r = shapeData[intersection.shapeIndex].s3;
-											refractedIntersection.t = raySphere(interiorRefractedRay, current);
-											refractedIntersection.P = intersection.P + refractedIntersection.t * interiorRefractedRay.d;
-											refractedIntersection.N = refractedIntersection.P - current.c;
+											float tempT = raySphere(interiorRefractedRay, current, false);
+											if(tempT < EPSILON || tempT == INFINITY)
+												break;
+											refractedIntersection.t = tempT;
+											refractedIntersection.P = interiorRefractedRay.o + refractedIntersection.t * interiorRefractedRay.d;
+											refractedIntersection.N = -normalize(refractedIntersection.P - current.c);
 											reflectance *= specularTransmittance;
 											
 											
-											cosI = clamp(dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
+											cosI = clamp(-dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
+											//if(cosI > 0.f && cosI < 1.f)
+												//radiance = (float3)(1.f, 0.f, 0.f);										
 											sinT2 = refractiveIndex * refractiveIndex * (1.f - cosI * cosI);
-											if ( sinT2 > 1.f)
+											if ( sinT2 > 1.f){
+												radiance = (float3)(0.f, 0.f, 1.f);
 												break;
+											}
 											
 											
-											ray.o = refractedIntersection.P;
-											ray.d = refractiveIndex * normalize(interiorRefractedRay.d) - ( refractiveIndex + sqrt(1.f - sinT2)) * refractedIntersection.N;
-											
+											ray.o = refractedIntersection.P + current.r;
+											ray.d = refractiveIndex * normalize(interiorRefractedRay.d) - ( refractiveIndex * cosI + sqrt(1.f - sinT2)) * refractedIntersection.N;
 										}
+									}
 										
 									
 									
 								}
-								else
+								else{
+									//radiance += (float3)(1.f, 1.f, 0.f);
 									break;
+								}
 							}
 							
 								//debug[0] = (float16)(intersection.P, -5);
 								//debug[1] = (float4)(intersection.N, -10);
 								
+								unsigned int counter = counters[row * columns + col];
 								
-								float4 Intensity = clamp(radiance, 0.0f, 1.f);
-										
-								uchar red = (uchar) round(255*Intensity.x);
-								uchar green = (uchar) round(255*Intensity.y);
-								uchar blue = (uchar) round(255*Intensity.z);
+								float3 Intensity = clamp(radiance, 0.0f, 1.f);
+								float3 oldIntensity = (float3)((float)raster[row * columns + col].x, (float)raster[row * columns + col].y, (float)raster[row * columns + col].z)  / 255.f;
+								float3 newIntensity = ((counter) * oldIntensity + Intensity) / ++counter;
+								
+								counters[row * columns + col] = counter;
+								
+								uchar red = (uchar) round(255*newIntensity.x);
+								uchar green = (uchar) round(255*newIntensity.y);
+								uchar blue = (uchar) round(255*newIntensity.z);
 								color = (uchar4)(red, green, blue, 255);
+								
+								
 							}
 						}
 					gridI *= 255/4;
 					for(int i = 0; i < numShapes; i++)
 						debug[i] = shapeData[i];
-					raster[row * columns + col] = raster[row * columns + col] / 2 + color / 2;//(uchar4)(color.x , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
+					
+					// Write local seeds back to buffer
+					seeds[2*col] = s1;
+					seeds[2*col+1] = s2;
+					
+					raster[row * columns + col] = color;//(uchar4)(color.x , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
 				}
 		</script>
 		<script type="text/javascript">
@@ -615,6 +715,7 @@ Assignment 1
 			var localWS = null;
 			var globalWS = null;
 			var seeds;
+			var runCount = 0;
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -730,15 +831,18 @@ Assignment 1
 			}
 			
 			function updateScene(){
-				for(var i = 0; i < canvas.width*canvas.height; i++){
-					seeds[i] = Math.floor(Math.random()*37000);
-				}
+				//for(var i = 0; i < canvas.width*canvas.height; i++){
+				//	seeds[i] = Math.floor(Math.random()*37000);
+				//}
 				
-				clCQ.enqueueWriteBuffer(clBuffers.seedsBuffer, true, 0, 4*seeds.length, seeds, []);
+				//clCQ.enqueueWriteBuffer(clBuffers.seedsBuffer, true, 0, 4*seeds.length, seeds, []);
 				var startTime = new Date().getTime();
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
 				var endTime = new Date().getTime();
+				runCount++;
+				if(runCount % 5 == 0)
+					console.log("Run count: "+runCount);
 				//console.log("Compute time: "+(endTime-startTime));	
 				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
 				canvasCtx.putImageData(raster, 0, 0);
@@ -1057,7 +1161,7 @@ Assignment 1
 					shapeNormals[0] = 0;
 					shapeIndices[0] = 0;
 					numShapes = shapeData.length/16;
-					console.log(shapeData);
+					//console.log(shapeData);
 					
 				}
 				else if(model.meshes){
@@ -1155,15 +1259,28 @@ Assignment 1
 				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
 				clBuffers.gridMetadataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.metadataFlat.length);
 				clBuffers.gridVoxelsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.voxelsFlat.length);
-				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*canvas.width*canvas.height);
+				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_WRITE, 4*canvas.width*canvas.height);
+				clBuffers.counterBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_WRITE, 4*canvas.width*canvas.height);
 				
-				seeds = new Uint32Array(canvas.width*canvas.height);
-				for(var i = 0; i < canvas.width*canvas.height; i++){
-					seeds[i] = Math.floor(Math.random()*65000);
+				var counters = new Uint32Array(canvas.width * canvas.height);
+				for(var i = 0; i < canvas.width * canvas.height; i++)
+					counters[i] = 0;
+				
+				seeds = new Uint32Array(canvas.width * canvas.height * 2);
+				for(var i = 0; i < 2*canvas.width*canvas.height; i++){
+					seeds[i] = Math.random() * 2147483647;
+					if(seeds[i] < 2) {
+						seeds[i] = 2;
+					}
 				}
-				clBuffers.seedsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*seeds.length);
+				clBuffers.seedsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_WRITE, 4*seeds.length);
 				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
 
+				clKernels.clearRasterKernel = clProgram.createKernel("clearRaster");
+				clKernels.clearRasterKernel.setKernelArg(0, canvas.width, WebCL.types.INT);
+				clKernels.clearRasterKernel.setKernelArg(1, clBuffers.rasterBuffer);
+				
+				
 				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
 				clKernels.colorKernel.setKernelArg(0, shapeType, WebCL.types.INT);
 				clKernels.colorKernel.setKernelArg(1, numShapes, WebCL.types.INT);
@@ -1175,7 +1292,8 @@ Assignment 1
 				clKernels.colorKernel.setKernelArg(7, clBuffers.gridVoxelsBuffer);
 				clKernels.colorKernel.setKernelArg(8, clBuffers.rasterBuffer);
 				clKernels.colorKernel.setKernelArg(9, clBuffers.seedsBuffer);
-				clKernels.colorKernel.setKernelArg(10, clBuffers.debugBuffer);
+				clKernels.colorKernel.setKernelArg(10, clBuffers.counterBuffer);
+				clKernels.colorKernel.setKernelArg(11, clBuffers.debugBuffer);
 				//console.log(device);
 				wsSize = clKernels.colorKernel.getKernelWorkGroupInfo(device, WebCL.CL_KERNEL_WORK_GROUP_SIZE);
 				xSize = Math.floor(Math.sqrt(wsSize)); 
@@ -1186,6 +1304,8 @@ Assignment 1
 					Math.ceil (canvas.height / localWS[1]) * localWS[1]
 				];
 				
+				clCQ.enqueueNDRangeKernel(clKernels.clearRasterKernel, globalWS.length, [], globalWS, localWS, []);
+				clCQ.finish();
 				var startTime = new Date().getTime();
 				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
 				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
@@ -1194,6 +1314,7 @@ Assignment 1
 				clCQ.enqueueWriteBuffer(clBuffers.gridMetadataBuffer, true, 0, 4*boundingVolume.grid.metadataFlat.length, new Uint32Array(boundingVolume.grid.metadataFlat), []);
 				clCQ.enqueueWriteBuffer(clBuffers.gridVoxelsBuffer, true, 0, 4*boundingVolume.grid.voxelsFlat.length, new Uint32Array(boundingVolume.grid.voxelsFlat), []);
 				clCQ.enqueueWriteBuffer(clBuffers.seedsBuffer, true, 0, 4*seeds.length, seeds, []);
+				clCQ.enqueueWriteBuffer(clBuffers.counterBuffer, true, 0, 4*counters.length, counters, []);
 				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
 				clCQ.finish();
 				//console.log("Compute time: "+(new Date().getTime()-startTime));	
@@ -1201,9 +1322,9 @@ Assignment 1
 				canvasCtx.putImageData(raster, 0, 0);
 				sceneLoaded = true;
 				
-				var debug = new Float32Array(shapeData.length);
-				clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*shapeData.length, debug, []);	
-				console.log(debug);
+				//var debug = new Float32Array(shapeData.length);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*shapeData.length, debug, []);	
+				//console.log(debug);
 					
 			}
 			

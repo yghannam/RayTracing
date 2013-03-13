@@ -365,8 +365,8 @@ Assignment 1
 					float3 V = viewData[7].xyz;					
 					float3 W = viewData[8].xyz;
 					
-					int numIter = 0;
-					int3 gridI = (int3)(0,0,0);
+					// int numIter = 0;
+					// int3 gridI = (int3)(0,0,0);
 					
 					
 					
@@ -376,314 +376,315 @@ Assignment 1
 					//float enableInterreflection = viewData[7].x;
 					bool accelerated = (flags.x == 1.0f);
 					
-					unsigned int s1 = seeds[2*col];
-					unsigned int s2 = seeds[2*col+1];
-					float r1 = random(&s1, &s2);
-					float r2 = random(&s1, &s2);
+					// Send MxN number of rays through pixel
+					int m, n;
+					int M = 4, N = 4;
+					for(m = 0; m < M; m++)
+						for(n = 0; n < N; n++){
+					
+						unsigned int s1 = seeds[2*(row*columns+col)];
+						unsigned int s2 = seeds[2*(row*columns+col)+1];
+						float r1 = (m+random(&s1, &s2))/M;
+						float r2 = (n+random(&s1, &s2))/N;
 
-					float3 localDirection;
-					localDirection.x = width * ( (r1+col)/columns - 0.5f);
-					localDirection.y = height * (0.5f - (r2+row)/rows);
-					localDirection.z = -1.f;					
-					
-					Ray worldRay;
-					worldRay.o = eye;
-					worldRay.d = transformRayDirection(localDirection, U, V, W);
-					
-					// for(int i = 0; i < numShapes; i++)
-						// debug[i] = shapeData[i];//(float4)(0,0,0,0);
-					//debug[0] = shapeData[i];
-					
-					uchar4 color = (uchar4)(0, 128, 0, 255);
-					
-					float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
-					if( tmin < INFINITY ){
-					
-						Intersection intersection;
+						float3 localDirection;
+						localDirection.x = width * ( (r1+col)/columns - 0.5f);
+						localDirection.y = height * (0.5f - (r2+row)/rows);
+						localDirection.z = -1.f;					
 						
+						Ray worldRay;
+						worldRay.o = eye;
+						worldRay.d = transformRayDirection(localDirection, U, V, W);
 						
-						Sphere lightSource;// = (float3)(50.f, 50.6f, 81.6f);
-						float3 lightIntensity = (float3)(1.f, 1.f, 1.f);
-						float lightArea = 0;
+						// for(int i = 0; i < numShapes; i++)
+							// debug[i] = shapeData[i];//(float4)(0,0,0,0);
+						//debug[0] = shapeData[i];
 						
-						for(int i = 0; i < numShapes; i++){
-							if(shapeData[i].s5 == 1){
-								lightSource.c = shapeData[i].s012;
-								lightSource.r = shapeData[i].s3;
-								lightIntensity = shapeData[i].scde;
-								lightArea = 4.f * Pi * lightSource.r * lightSource.r;
-							}
-						}
-						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
-						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
-						float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
-						float shininess = 10;
-						float3 radiance = (float3)(0, 0, 0);
-												
+						uchar4 color = (uchar4)(0, 128, 0, 255);
 						
-						if(accelerated){					
-							
-							float3 boundSize = boundMax-boundMin;
-							
-							int di = (worldRay.d.x >= 0) ? 1 : -1;
-							int xOutOfRange = (worldRay.d.x >= 0) ? (int)gridRes.x : -1;
-							float dTx = boundSize.x / fabs(worldRay.d.x);
-							
-							int dj = (worldRay.d.y >= 0) ? 1 : -1;
-							int yOutOfRange = (worldRay.d.y >= 0) ? (int)gridRes.y : -1;
-							float dTy = boundSize.y / fabs(worldRay.d.y);
-							
-							int dk = (worldRay.d.z >= 0) ? 1 : -1;
-							int zOutOfRange = (worldRay.d.z >= 0) ? (int)gridRes.z : -1;
-							float dTz = boundSize.z / fabs(worldRay.d.z);
+						float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
+						if( tmin < INFINITY ){
+						
+							Intersection intersection;
 							
 							
-							bool intersected = false;
-							float tCurrent = max(0.f, tmin);
-							float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
-							int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
-							float dX = boundSize.x / gridRes.x;
-							float txNext = (di == 1) ? 
-								tCurrent+((boundMin.x + (gridCoord.x+di) * dX - gridPoint.x) / worldRay.d.x) :
-								tCurrent+((boundMin.x + (gridCoord.x) * dX - gridPoint.x) / worldRay.d.x);
-							float dY = boundSize.y / gridRes.y;
-							float tyNext = (dj == 1) ?
-								tCurrent+((boundMin.y + (gridCoord.y+dj) * dY - gridPoint.y) / worldRay.d.y) :
-								tCurrent+((boundMin.y + (gridCoord.y) * dY - gridPoint.y) / worldRay.d.y);
-							float dZ = boundSize.z / gridRes.z;
-							float tzNext = (dk == 1) ?
-								tCurrent+((boundMin.z + (gridCoord.z+dk) * dZ - gridPoint.z) / worldRay.d.z) :
-								tCurrent+((boundMin.z + (gridCoord.z) * dZ - gridPoint.z) / worldRay.d.z);
-															
-							while(!intersected){
-								
-								if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
+							Sphere lightSource;// = (float3)(50.f, 50.6f, 81.6f);
+							float3 lightIntensity = (float3)(1.f, 1.f, 1.f);
+							float lightArea = 0;
+							
+							for(int i = 0; i < numShapes; i++){
+								if(shapeData[i].s5 == 1){
+									lightSource.c = shapeData[i].s012;
+									lightSource.r = shapeData[i].s3;
+									lightIntensity = shapeData[i].scde;
+									lightArea = 4.f * Pi * lightSource.r * lightSource.r;
 									break;
-								
-								numIter++;
-								int voxelIndex = gridCoord.z + ( gridCoord.y + gridCoord.x*(int)gridRes.y) * (int)gridRes.z;
-								
-								intersection 
-									= intersectGrid(worldRay, false, shapeType, voxelIndex, gridMetadata, gridVoxels, shapeData, shapeNormals, shapeIndices);
-								
-								intersected = (intersection.t < INFINITY);
-								
-								if(!intersected){
-									if(txNext < tyNext && txNext < tzNext){
-										gridCoord.x += di;
-										txNext += dTx;
-									}										
-									else if(tyNext < txNext && tyNext < tzNext){
-										gridCoord.y += dj;
-										tyNext += dTy;
-									}
-									else{//if(tzNext < txNext && tzNext < tyNext){
-										gridCoord.z += dk;
-										tzNext += dTz;
-									}		
 								}
 							}
+							// float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+							// float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
+							// float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
+							float shininess = 10;
+							float3 radiance = (float3)(0, 0, 0);
+													
 							
-							gridI = gridCoord;
-							
-						}
-						else{
-							Ray ray;
-							ray.o = worldRay.o;
-							ray.d = worldRay.d;
-							
-							float3 reflectance = (float3)(1, 1, 1);
-							for(int i = 0; i < 6; i++){
-								intersection 
-									= intersect(ray, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);	
-								if (intersection.t < INFINITY){
-							
-									// Reverse Normal if Light Source is within Shape
-									if(isLightInShape(intersection, shapeData, lightSource))
-										intersection.N = -intersection.N;
+							if(accelerated){					
+								
+								float3 boundSize = boundMax-boundMin;
+								
+								int di = (worldRay.d.x >= 0) ? 1 : -1;
+								int xOutOfRange = (worldRay.d.x >= 0) ? (int)gridRes.x : -1;
+								float dTx = boundSize.x / fabs(worldRay.d.x);
+								
+								int dj = (worldRay.d.y >= 0) ? 1 : -1;
+								int yOutOfRange = (worldRay.d.y >= 0) ? (int)gridRes.y : -1;
+								float dTy = boundSize.y / fabs(worldRay.d.y);
+								
+								int dk = (worldRay.d.z >= 0) ? 1 : -1;
+								int zOutOfRange = (worldRay.d.z >= 0) ? (int)gridRes.z : -1;
+								float dTz = boundSize.z / fabs(worldRay.d.z);
+								
+								
+								bool intersected = false;
+								float tCurrent = max(0.f, tmin);
+								float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
+								int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
+								float dX = boundSize.x / gridRes.x;
+								float txNext = (di == 1) ? 
+									tCurrent+((boundMin.x + (gridCoord.x+di) * dX - gridPoint.x) / worldRay.d.x) :
+									tCurrent+((boundMin.x + (gridCoord.x) * dX - gridPoint.x) / worldRay.d.x);
+								float dY = boundSize.y / gridRes.y;
+								float tyNext = (dj == 1) ?
+									tCurrent+((boundMin.y + (gridCoord.y+dj) * dY - gridPoint.y) / worldRay.d.y) :
+									tCurrent+((boundMin.y + (gridCoord.y) * dY - gridPoint.y) / worldRay.d.y);
+								float dZ = boundSize.z / gridRes.z;
+								float tzNext = (dk == 1) ?
+									tCurrent+((boundMin.z + (gridCoord.z+dk) * dZ - gridPoint.z) / worldRay.d.z) :
+									tCurrent+((boundMin.z + (gridCoord.z) * dZ - gridPoint.z) / worldRay.d.z);
+																
+								while(!intersected){
 									
-									Ray shadowRay;
-									shadowRay.o = intersection.P;
-									shadowRay.d = lightSource.c-intersection.P;
-									Intersection shadowIntersection 
-										= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
-									float tLight = raySphere(shadowRay, lightSource, false);//(L-shadowRay.o).x/shadowRay.d.x;							
+									if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
+										break;
 									
-									float3 lightDir = lightSource.c-intersection.P;
-									float lightDirLength = length(lightDir);
-									float invPiR2 = 1.f/(Pi * lightDirLength * lightDirLength);
-									float4 materialFlags = shapeData[intersection.shapeIndex].s4567;
+									//numIter++;
+									int voxelIndex = gridCoord.z + ( gridCoord.y + gridCoord.x*(int)gridRes.y) * (int)gridRes.z;
 									
-									// Diffuse Reflectance
-									if(materialFlags.x == 1){
+									intersection 
+										= intersectGrid(worldRay, false, shapeType, voxelIndex, gridMetadata, gridVoxels, shapeData, shapeNormals, shapeIndices);
 									
-										// Direct Illumination
-										if(shadowIntersection.t >= tLight){
-											reflectance *= shapeData[intersection.shapeIndex].s89a;
-											radiance +=  reflectance * lightIntensity * lightArea * invPiR2 * clamp(dot(intersection.N, normalize(lightDir)), 0.0f, 1.f);
+									intersected = (intersection.t < INFINITY);
+									
+									if(!intersected){
+										if(txNext < tyNext && txNext < tzNext){
+											gridCoord.x += di;
+											txNext += dTx;
+										}										
+										else if(tyNext < txNext && tyNext < tzNext){
+											gridCoord.y += dj;
+											tyNext += dTy;
 										}
+										else{//if(tzNext < txNext && tzNext < tyNext){
+											gridCoord.z += dk;
+											tzNext += dTz;
+										}		
+									}
+								}
+								
+								// gridI = gridCoord;
+								
+							}
+							else{
+								Ray ray;
+								ray.o = worldRay.o;
+								ray.d = worldRay.d;
+								
+								float3 reflectance = (float3)(1.f, 1.f, 1.f);
+								for(int i = 0; i < 6; i++){
+									intersection 
+										= intersect(ray, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);	
+									if (intersection.t < INFINITY){
+								
+										// Reverse Normal if Light Source is within Shape
+										if(isLightInShape(intersection, shapeData, lightSource))
+											intersection.N = -intersection.N;
 										
-										// TODO: Diffuse Random Sample
-										// Get Random Sample on Unit Hemisphere
-										// Create local coordinate frame for intersection
-										// Transform sample to global coordinate frame
-										
-										// Start with Normal, find smallest absolute component make it 1
-										// Cross product with Normal and New vector e.g. N x (N.x, N.y, 1)
-										// W = N, U = (N.x, N.y, 1), V = W x U
-										float3 temp = intersection.N;
-										if(fabs(temp.x) < fabs(temp.y) && fabs(temp.x) < fabs(temp.z))
-											temp.x = 1;
-										else if(fabs(temp.y) < fabs(temp.x) && fabs(temp.y) < fabs(temp.z))
-											temp.y = 1;
-										else
-											temp.z = 1;
-										float3 Wn = intersection.N;
-										float3 Un = normalize(cross(temp, Wn));;
-										float3 Vn = cross(Wn, Un);
-										
-										float3 sampleDir;
-										sampleDir.z = random(&s1, &s2);
+										// Sample Light Source
+										float3 lightSamplePoint;
+										float3 temp;
+										temp.z = random(&s1, &s2) * 2.f - 1.f;
 										float phi = 2.f * Pi * random(&s1, &s2);
-										float r = sqrt(1.f - sampleDir.z*sampleDir.z);
-										sampleDir.x = r * cos(phi);
-										sampleDir.y = r * sin(phi);
-										ray.d.x = sampleDir.x * Un.x + sampleDir.y * Vn.x + sampleDir.z * Wn.x;
-										ray.d.y = sampleDir.x * Un.y + sampleDir.y * Vn.y + sampleDir.z * Wn.y;
-										ray.d.z = sampleDir.x * Un.z + sampleDir.y * Vn.z + sampleDir.z * Wn.z;
-										ray.o = intersection.P;
-									}
-									
-									// Emittance
-									if(materialFlags.y == 1){
-										radiance += shapeData[intersection.shapeIndex].scde;
-										break; // Break ray path
-									}
-									
-									
-									// Use Fresnel to calculate probability and select reflectance or transmission
-									////Specular Reflectance
-									// if(materialFlags.z == 1){
+										float rTemp = sqrt(1.f - temp.z * temp.z);
+										temp.x = rTemp * cos(phi);
+										temp.y = rTemp * sin(phi);
+										lightSamplePoint.x = lightSource.c.x + lightSource.r * temp.x;
+										lightSamplePoint.y = lightSource.c.y + lightSource.r * temp.y;
+										lightSamplePoint.z = lightSource.c.z + lightSource.r * temp.z;
+										float3 lightDir = lightSamplePoint-intersection.P;
+										float lightDirLength = length(lightDir);
+										float invPiR2 = 1.f/(Pi * lightDirLength * lightDirLength);
 										
-										////Direct Illumination
-										// if(shadowIntersection.t >= tLight){
-											// float3 View = normalize( -ray.d);
-											// float3 R = reflect(intersection.N, lightDir);	
-											// reflectance *= shapeData[intersection.shapeIndex].s89a;
-											// radiance += reflectance * invPiR2 * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
-										// }
+										Ray shadowRay;
+										shadowRay.o = intersection.P;
+										shadowRay.d = lightSamplePoint-intersection.P;
+										Intersection shadowIntersection 
+											= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+										float tLight = raySphere(shadowRay, lightSource, false);
 										
-										// ray.d = reflect(intersection.N, ray.o-intersection.P);
-										// ray.o = intersection.P;
-										// continue;
-									// }
-									
-									// Refractive Index / Specular Transmittance
-									if(materialFlags.w != 0){
-										//radiance += (float3)(0.f, 0.f, 1.f);
+										float4 materialFlags = shapeData[intersection.shapeIndex].s4567;
 										
-										float refractiveIndex = 1.9f;//1.9f;//shapeData[intersection.shapeIndex].s7;
-										float3 specularTransmittance = (float3)(0.9f, 0.9f, 0.9f);//shapeData[intersection.shapeIndex].scde;
+										// Diffuse Reflectance
+										if(materialFlags.x == 1){
 										
-										float interiorRefractiveRatio = 1.f/refractiveIndex;
-										float cosI = clamp(dot(normalize(-ray.d), intersection.N), 0.f, 1.f);
-										//if(cosI > 0.f && cosI < 1.f)
-											//radiance = (float3)(0.f, 1.f, 0.f);
-										float sinT2 = interiorRefractiveRatio * interiorRefractiveRatio * (1.f - cosI * cosI);
-										if (sinT2 > 1.f){
-											//radiance = (float3)(0.f, 1.f, 1.f);
-											break;
-										}
-										
-										Ray interiorRefractedRay;
-										interiorRefractedRay.o = intersection.P;
-										interiorRefractedRay.d = interiorRefractiveRatio * normalize(ray.d) - ( interiorRefractiveRatio * cosI + sqrt(1.f - sinT2)) * intersection.N;
-										
-										float cosT = clamp(dot(-intersection.N, interiorRefractedRay.d), 0.f, 1.f);
-										float rho = calcRho(cosI, cosT, 1.f, refractiveIndex);
-										
-										// Reflect
-										if(random(&s1, &s2) < rho){
+											reflectance *= shapeData[intersection.shapeIndex].s89a ;
+											
 											// Direct Illumination
 											if(shadowIntersection.t >= tLight){
-												float3 View = normalize( -ray.d);
-												float3 R = reflect(intersection.N, lightDir);	
-												reflectance *= shapeData[intersection.shapeIndex].s89a;
-												radiance += reflectance * invPiR2 * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+												radiance += reflectance
+															* lightIntensity 
+															* lightArea 
+															* invPiR2 
+															* clamp(dot(intersection.N, normalize(lightDir)), 0.0f, 1.f)
+															* clamp(dot(lightSamplePoint-lightSource.c, -normalize(lightDir)), 0.0f, 1.f);
 											}
 											
-											ray.d = reflect(intersection.N, ray.o-intersection.P);
+											// Get Random Sample on Unit Hemisphere
+											// Create local coordinate frame for intersection
+											// Transform sample to global coordinate frame
+											
+											// Start with Normal, find smallest absolute component make it 1
+											// Cross product with Normal and New vector e.g. N x (N.x, N.y, 1)
+											// W = N, U = (N.x, N.y, 1), V = W x U
+											float3 temp = (fabs(intersection.N.x) > 0.1f) ? (float3)(0.f, 1.f, 0.f):(float3)(1.f, 0.f, 0.f);//intersection.N;
+											// if(fabs(temp.x) < fabs(temp.y) && fabs(temp.x) < fabs(temp.z))
+												// temp.x = 1.f;
+											// else if(fabs(temp.y) < fabs(temp.x) && fabs(temp.y) < fabs(temp.z))
+												// temp.y = 1.f;
+											// else
+												// temp.z = 1.f;
+											float3 Wn = intersection.N;
+											float3 Un = normalize(cross(temp, Wn));;
+											float3 Vn = cross(Wn, Un);
+											
+											float3 sampleDir;
+											sampleDir.z = random(&s1, &s2);
+											float phi = 2.f * Pi * random(&s1, &s2);
+											float r = sqrt(1.f - sampleDir.z*sampleDir.z);
+											sampleDir.x = r * cos(phi);
+											sampleDir.y = r * sin(phi);
+											ray.d.x = sampleDir.x * Un.x + sampleDir.y * Vn.x + sampleDir.z * Wn.x;
+											ray.d.y = sampleDir.x * Un.y + sampleDir.y * Vn.y + sampleDir.z * Wn.y;
+											ray.d.z = sampleDir.x * Un.z + sampleDir.y * Vn.z + sampleDir.z * Wn.z;
 											ray.o = intersection.P;
 										}
 										
-										// Refract
-										else{
+										// Emittance
+										if(materialFlags.y == 1){
+											radiance += shapeData[intersection.shapeIndex].scde;
+											break; // Break ray path
+										}
 										
-											Intersection refractedIntersection;
-											Sphere current;
-											current.c = shapeData[intersection.shapeIndex].s012;
-											current.r = shapeData[intersection.shapeIndex].s3;
-											float tempT = raySphere(interiorRefractedRay, current, false);
-											if(tempT < EPSILON || tempT == INFINITY)
-												break;
-											refractedIntersection.t = tempT;
-											refractedIntersection.P = interiorRefractedRay.o + refractedIntersection.t * interiorRefractedRay.d;
-											refractedIntersection.N = -normalize(refractedIntersection.P - current.c);
-											reflectance *= specularTransmittance;
+										
+										// Use Fresnel to calculate probability and select reflectance or transmission
+										
+										// Refractive Index / Specular Transmittance
+										if(materialFlags.w != 0){
+											//radiance += (float3)(0.f, 0.f, 1.f);
+											reflectance *= shapeData[intersection.shapeIndex].scde;
+											float refractiveIndex = 1.9f;//shapeData[intersection.shapeIndex].s7;
 											
-											
-											cosI = clamp(-dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
-											//if(cosI > 0.f && cosI < 1.f)
-												//radiance = (float3)(1.f, 0.f, 0.f);										
-											sinT2 = refractiveIndex * refractiveIndex * (1.f - cosI * cosI);
-											if ( sinT2 > 1.f){
-												radiance = (float3)(0.f, 0.f, 1.f);
-												break;
+											float interiorRefractiveRatio = 1.f/refractiveIndex;
+											float cosI = clamp(dot(normalize(-ray.d), intersection.N), 0.f, 1.f);
+											float sinT2 = interiorRefractiveRatio * interiorRefractiveRatio * (1.f - cosI * cosI);
+											if (sinT2 >= 1.f){
+												// break;
+												if(shadowIntersection.t >= tLight){
+													float3 View = normalize( -ray.d);
+													float3 R = reflect(intersection.N, lightDir);	
+													radiance += reflectance * invPiR2 * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+												}
+												
+												ray.d = reflect(intersection.N, ray.o-intersection.P);
+												ray.o = intersection.P;
+												continue;
 											}
 											
+											Ray interiorRefractedRay;
+											interiorRefractedRay.o = intersection.P;
+											interiorRefractedRay.d = interiorRefractiveRatio * normalize(ray.d) - ( interiorRefractiveRatio * cosI + sqrt(1.f - sinT2)) * intersection.N;
 											
-											ray.o = refractedIntersection.P + current.r;
-											ray.d = refractiveIndex * normalize(interiorRefractedRay.d) - ( refractiveIndex * cosI + sqrt(1.f - sinT2)) * refractedIntersection.N;
+											float cosT = clamp(dot(-intersection.N, interiorRefractedRay.d), 0.f, 1.f);
+											float rho = calcRho(cosI, cosT, 1.f, refractiveIndex);
+											
+											// Reflect
+											if(random(&s1, &s2) < rho){
+												// Direct Illumination
+												if(shadowIntersection.t >= tLight){
+													float3 View = normalize( -ray.d);
+													float3 R = reflect(intersection.N, lightDir);	
+													radiance += reflectance * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+												}
+												
+												ray.d = reflect(intersection.N, ray.o-intersection.P);
+												ray.o = intersection.P;
+											}
+											
+											// Refract
+											else{
+											
+												Intersection refractedIntersection;
+												Sphere current;
+												current.c = shapeData[intersection.shapeIndex].s012;
+												current.r = shapeData[intersection.shapeIndex].s3;
+												float tempT = raySphere(interiorRefractedRay, current, false);
+												if(tempT < EPSILON || tempT == INFINITY)
+													break;
+												refractedIntersection.t = tempT;
+												refractedIntersection.P = interiorRefractedRay.o + refractedIntersection.t * interiorRefractedRay.d;
+												refractedIntersection.N = -normalize(refractedIntersection.P - current.c);												
+												
+												cosI = clamp(-dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
+												sinT2 = refractiveIndex * refractiveIndex * (1.f - cosI * cosI);
+												if ( sinT2 >= 1.f){
+													radiance = (float3)(0.f, 0.f, 1.f);
+													break;
+												}												
+												
+												ray.o = refractedIntersection.P;
+												ray.d = refractiveIndex * normalize(interiorRefractedRay.d) - ( refractiveIndex * cosI + sqrt(1.f - sinT2)) * refractedIntersection.N;
+											}
 										}
 									}
-										
+									else{
+										break;
+									}
+								}
+								
+									unsigned int counter = counters[row * columns + col];
+									
+									float3 Intensity = clamp(radiance, 0.0f, 1.f);
+									float3 oldIntensity = (float3)((float)raster[row * columns + col].x, (float)raster[row * columns + col].y, (float)raster[row * columns + col].z)  / 255.f;
+									float3 newIntensity = ((float)(counter) * oldIntensity + Intensity) / (float)(++counter);
+									
+									counters[row * columns + col] = counter;
+									
+									uchar red = (uchar) round(255*newIntensity.x);
+									uchar green = (uchar) round(255*newIntensity.y);
+									uchar blue = (uchar) round(255*newIntensity.z);
+									color = (uchar4)(red, green, blue, 255);
 									
 									
 								}
-								else{
-									//radiance += (float3)(1.f, 1.f, 0.f);
-									break;
-								}
 							}
-							
-								//debug[0] = (float16)(intersection.P, -5);
-								//debug[1] = (float4)(intersection.N, -10);
-								
-								unsigned int counter = counters[row * columns + col];
-								
-								float3 Intensity = clamp(radiance, 0.0f, 1.f);
-								float3 oldIntensity = (float3)((float)raster[row * columns + col].x, (float)raster[row * columns + col].y, (float)raster[row * columns + col].z)  / 255.f;
-								float3 newIntensity = ((counter) * oldIntensity + Intensity) / ++counter;
-								
-								counters[row * columns + col] = counter;
-								
-								uchar red = (uchar) round(255*newIntensity.x);
-								uchar green = (uchar) round(255*newIntensity.y);
-								uchar blue = (uchar) round(255*newIntensity.z);
-								color = (uchar4)(red, green, blue, 255);
-								
-								
-							}
-						}
-					gridI *= 255/4;
-					for(int i = 0; i < numShapes; i++)
-						debug[i] = shapeData[i];
-					
-					// Write local seeds back to buffer
-					seeds[2*col] = s1;
-					seeds[2*col+1] = s2;
-					
-					raster[row * columns + col] = color;//(uchar4)(color.x , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
+						// for(int i = 0; i < numShapes; i++)
+							// debug[i] = shapeData[i];
+						
+						// Write local seeds back to buffer
+						seeds[2*col] = s1;
+						seeds[2*col+1] = s2;
+						
+						raster[row * columns + col] = color;
+					}
 				}
 		</script>
 		<script type="text/javascript">
@@ -716,6 +717,7 @@ Assignment 1
 			var globalWS = null;
 			var seeds;
 			var runCount = 0;
+			var render = true;
 			
 			function parseJSON(jsonFile){
 				var xhttp = new XMLHttpRequest();
@@ -1046,7 +1048,9 @@ Assignment 1
 			}
 			
 			function loadScene(){	
-
+				
+				runCount = 0;
+				console.log("Start Render");
 				for ( x in clBuffers){
 					clBuffers[x].releaseCLResources();
 				}			
@@ -1328,9 +1332,13 @@ Assignment 1
 					
 			}
 			
+			function updateRender(){
+				render = !render;
+			}
+			
 			function main(){
 				document.getElementById("inputFile").value = "";
-				document.getElementById("acceleration").checked = false;
+				//document.getElementById("acceleration").checked = false;
 								
 				try{
 					canvas = document.getElementById("myCanvas");
@@ -1352,7 +1360,7 @@ Assignment 1
 					var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
 					(function callback(){
 						requestAnimationFrame(callback);
-						if(sceneLoaded){
+						if(sceneLoaded && render){
 							if(rotate)
 								updateCamera();
 							updateScene();
@@ -1387,9 +1395,12 @@ Assignment 1
 			<canvas id="myCanvas" width="640" height="480"></canvas>
 		</div>
 		<div style="float:left">
-			<p>Camera Controls</p>
+			<!--p>Camera Controls</p>
 			<input type="button" onclick="updateRotate();" value="Start/Stop Rotation">
 			<input type="checkbox" id="acceleration" onchange="updateAcceleration();">Enable Acceleration
+			<br-->
+			<input type="button" onclick="updateRender();" value="Start/Stop Rendering">
+			<input type="button" onclick="loadScene();" value="Reset">
 		</div>
 	</body>
 </html>

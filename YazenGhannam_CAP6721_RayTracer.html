@@ -500,7 +500,7 @@ Assignment 1
 								ray.d = worldRay.d;
 								
 								float3 reflectance = (float3)(1.f, 1.f, 1.f);
-								for(int i = 0; i < 6; i++){
+								for(int i = 0; i < 7; i++){
 									intersection 
 										= intersect(ray, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);	
 									if (intersection.t < INFINITY){
@@ -526,7 +526,7 @@ Assignment 1
 										
 										Ray shadowRay;
 										shadowRay.o = intersection.P;
-										shadowRay.d = lightSamplePoint-intersection.P;
+										shadowRay.d = lightDir;//lightSamplePoint-intersection.P;
 										Intersection shadowIntersection 
 											= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
 										float tLight = raySphere(shadowRay, lightSource, false);
@@ -646,8 +646,16 @@ Assignment 1
 												cosI = clamp(-dot(normalize(interiorRefractedRay.d), refractedIntersection.N), 0.f, 1.f);
 												sinT2 = refractiveIndex * refractiveIndex * (1.f - cosI * cosI);
 												if ( sinT2 >= 1.f){
-													radiance = (float3)(0.f, 0.f, 1.f);
-													break;
+													// Direct Illumination
+													if(shadowIntersection.t >= tLight){
+														float3 View = normalize( -ray.d);
+														float3 R = reflect(intersection.N, lightDir);	
+														radiance += reflectance * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+													}
+													
+													ray.d = reflect(intersection.N, ray.o-intersection.P);
+													ray.o = intersection.P;		
+													continue;
 												}												
 												
 												ray.o = refractedIntersection.P;
@@ -680,8 +688,8 @@ Assignment 1
 							// debug[i] = shapeData[i];
 						
 						// Write local seeds back to buffer
-						seeds[2*col] = s1;
-						seeds[2*col+1] = s2;
+						seeds[2*(row*columns+col)] = s1;
+						seeds[2*(row*columns+col)+1] = s2;
 						
 						raster[row * columns + col] = color;
 					}

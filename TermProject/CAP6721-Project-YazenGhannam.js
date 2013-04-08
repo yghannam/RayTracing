@@ -60,8 +60,8 @@ function initShaders(){
 	shaderProgram.elementBuffer = gl.createBuffer();
 	
 	shaderProgram.pMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uPMatrix");
-	shaderProgram.mvMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uMVMatrix");
-	//shaderProgram.mMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uMMatrix");
+	shaderProgram.vMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uVMatrix");
+	shaderProgram.mMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uMMatrix");
 	// shaderProgram.normalMatrixLocation 			= gl.getUniformLocation(shaderProgram, "normalMatrix");
 	// shaderProgram.cameraPositionLocation 		= gl.getUniformLocation(shaderProgram, "cameraPosition");
 	// shaderProgram.nkLocation 					= gl.getUniformLocation(shaderProgram, "nk");
@@ -80,14 +80,14 @@ function draw(){
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 	
 	var pMatrix = mat4.create();
-	var mvMatrix = mat4.create();
+	var vMatrix = mat4.create();
 
 	mat4.perspective(pMatrix, 45, 1, 0.1, 100.0);
+	mat4.lookAt(vMatrix, [0, 0, -60], [0, 0, 0], [0, 1, 0]);
 	
-	mat4.lookAt(mvMatrix, [0, 0, -6], [0, 0, 0], [0, 1, 0]);
 
 	gl.uniformMatrix4fv(shaderProgram.pMatrixLocation, false, pMatrix);
-    gl.uniformMatrix4fv(shaderProgram.mvMatrixLocation, false, mvMatrix);
+    gl.uniformMatrix4fv(shaderProgram.vMatrixLocation, false, vMatrix);
 		
 	//console.log(moonVertexPositionBuffer);
 	
@@ -100,7 +100,16 @@ function draw(){
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shaderProgram.elementBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,  new Uint16Array(moonVertexIndexBuffer), gl.STATIC_DRAW);
 	
-	gl.drawElements(gl.TRIANGLES, moonVertexIndexBuffer.length, gl.UNSIGNED_SHORT, 0);	
+	var numSpheres = 5;
+	
+	for(var i = 0; i < numSpheres; i++){
+		var mMatrix = mat4.create();
+		mat4.translate(mMatrix, mMatrix, [i, i, i]);
+		
+		gl.uniformMatrix4fv(shaderProgram.mMatrixLocation, false, mMatrix);
+		gl.drawElements(gl.TRIANGLES, moonVertexIndexBuffer.length, gl.UNSIGNED_SHORT, 0);	
+		
+	}
 }
 
 var moonVertexPositionBuffer = [];

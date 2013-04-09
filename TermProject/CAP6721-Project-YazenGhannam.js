@@ -5,8 +5,20 @@ CAP 6721
 Project
 */
 
-var gl = null;
+var glCtx = null;
+var clCtx = null;
 var shaderProgram = null;
+var platforms = null;
+var devices = [];
+var canvas = null;
+var canvasCtx = null;
+var raster = null;
+var rv = null;
+var device = null;
+var clCQ = null;
+var clProgram = null;
+var clKernels = new Object();
+var clBuffers = new Object();
 var numSpheres = 500;
 var spherePositions = [];
 var startDraw = false;
@@ -21,59 +33,59 @@ function parseShader(shaderFile){
 function initShaders(){
 
 	var vertexShaderCode = parseShader("vertex.shader");
-	var vertexShader = gl.createShader(gl.VERTEX_SHADER);
-	gl.shaderSource(vertexShader, vertexShaderCode);
-	gl.compileShader(vertexShader);
+	var vertexShader = glCtx.createShader(glCtx.VERTEX_SHADER);
+	glCtx.shaderSource(vertexShader, vertexShaderCode);
+	glCtx.compileShader(vertexShader);
 	
-	if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+	if (!glCtx.getShaderParameter(vertexShader, glCtx.COMPILE_STATUS)) {
             alert("Vertex Shader compilation failed: " +
-				gl.getShaderInfoLog(vertexShader));
+				glCtx.getShaderInfoLog(vertexShader));
     }
 	
 	var fragmentShaderCode = parseShader("fragment.shader");
-	var fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-	gl.shaderSource(fragmentShader, fragmentShaderCode);
-	gl.compileShader(fragmentShader);
+	var fragmentShader = glCtx.createShader(glCtx.FRAGMENT_SHADER);
+	glCtx.shaderSource(fragmentShader, fragmentShaderCode);
+	glCtx.compileShader(fragmentShader);
 	
-	if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+	if (!glCtx.getShaderParameter(fragmentShader, glCtx.COMPILE_STATUS)) {
             alert("Fragment Shader compilation failed: " +
-				gl.getShaderInfoLog(fragmentShader));
+				glCtx.getShaderInfoLog(fragmentShader));
     }
 	
-	shaderProgram = gl.createProgram();
-	gl.attachShader(shaderProgram, vertexShader);
-	gl.attachShader(shaderProgram, fragmentShader);
-	gl.linkProgram(shaderProgram);
-	if(!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)){
-		alert("Failed to link shaders: " + gl.getProgramInfoLog(shaderProgram));
+	shaderProgram = glCtx.createProgram();
+	glCtx.attachShader(shaderProgram, vertexShader);
+	glCtx.attachShader(shaderProgram, fragmentShader);
+	glCtx.linkProgram(shaderProgram);
+	if(!glCtx.getProgramParameter(shaderProgram, glCtx.LINK_STATUS)){
+		alert("Failed to link shaders: " + glCtx.getProgramInfoLog(shaderProgram));
 	}
-	shaderProgram.positionBuffer = gl.createBuffer();
-	gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.positionBuffer);
-	var positionLocation = gl.getAttribLocation(shaderProgram, "aVertexPosition");
-	gl.enableVertexAttribArray(positionLocation);
-	gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+	shaderProgram.positionBuffer = glCtx.createBuffer();
+	glCtx.bindBuffer(glCtx.ARRAY_BUFFER, shaderProgram.positionBuffer);
+	var positionLocation = glCtx.getAttribLocation(shaderProgram, "aVertexPosition");
+	glCtx.enableVertexAttribArray(positionLocation);
+	glCtx.vertexAttribPointer(positionLocation, 3, glCtx.FLOAT, false, 0, 0);
 	
-	shaderProgram.normalBuffer = gl.createBuffer();
-	gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.normalBuffer);
-	var normalLocation = gl.getAttribLocation(shaderProgram, "aVertexNormal");
-	gl.enableVertexAttribArray(normalLocation);
-	gl.vertexAttribPointer(normalLocation, 3, gl.FLOAT, false, 0, 0);
+	shaderProgram.normalBuffer = glCtx.createBuffer();
+	glCtx.bindBuffer(glCtx.ARRAY_BUFFER, shaderProgram.normalBuffer);
+	var normalLocation = glCtx.getAttribLocation(shaderProgram, "aVertexNormal");
+	glCtx.enableVertexAttribArray(normalLocation);
+	glCtx.vertexAttribPointer(normalLocation, 3, glCtx.FLOAT, false, 0, 0);
 	
-	shaderProgram.elementBuffer = gl.createBuffer();
+	shaderProgram.elementBuffer = glCtx.createBuffer();
 	
-	shaderProgram.pMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uPMatrix");
-	shaderProgram.vMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uVMatrix");
-	shaderProgram.mMatrixLocation 				= gl.getUniformLocation(shaderProgram, "uMMatrix");
-	// shaderProgram.normalMatrixLocation 			= gl.getUniformLocation(shaderProgram, "normalMatrix");
-	// shaderProgram.cameraPositionLocation 		= gl.getUniformLocation(shaderProgram, "cameraPosition");
-	// shaderProgram.nkLocation 					= gl.getUniformLocation(shaderProgram, "nk");
-	// shaderProgram.rgbMatrixLocation				= gl.getUniformLocation(shaderProgram, "rgbMatrix");
-	// shaderProgram.gammaLocation					= gl.getUniformLocation(shaderProgram, "gamma");
-	// shaderProgram.cieLocation 					= gl.getUniformLocation(shaderProgram, "cie");
-	// shaderProgram.texSamplerLocation			= gl.getUniformLocation(shaderProgram, "texSampler");
-	// shaderProgram.colorTemperatureLocation		= gl.getUniformLocation(shaderProgram, "colorTemperature");
-	// shaderProgram.enableCubeLocation			= gl.getUniformLocation(shaderProgram, "enableCube");
-	// shaderProgram.enableHDRLocation				= gl.getUniformLocation(shaderProgram, "enableHDR");
+	shaderProgram.pMatrixLocation 				= glCtx.getUniformLocation(shaderProgram, "uPMatrix");
+	shaderProgram.vMatrixLocation 				= glCtx.getUniformLocation(shaderProgram, "uVMatrix");
+	shaderProgram.mMatrixLocation 				= glCtx.getUniformLocation(shaderProgram, "uMMatrix");
+	// shaderProgram.normalMatrixLocation 			= glCtx.getUniformLocation(shaderProgram, "normalMatrix");
+	// shaderProgram.cameraPositionLocation 		= glCtx.getUniformLocation(shaderProgram, "cameraPosition");
+	// shaderProgram.nkLocation 					= glCtx.getUniformLocation(shaderProgram, "nk");
+	// shaderProgram.rgbMatrixLocation				= glCtx.getUniformLocation(shaderProgram, "rgbMatrix");
+	// shaderProgram.gammaLocation					= glCtx.getUniformLocation(shaderProgram, "gamma");
+	// shaderProgram.cieLocation 					= glCtx.getUniformLocation(shaderProgram, "cie");
+	// shaderProgram.texSamplerLocation			= glCtx.getUniformLocation(shaderProgram, "texSampler");
+	// shaderProgram.colorTemperatureLocation		= glCtx.getUniformLocation(shaderProgram, "colorTemperature");
+	// shaderProgram.enableCubeLocation			= glCtx.getUniformLocation(shaderProgram, "enableCube");
+	// shaderProgram.enableHDRLocation				= glCtx.getUniformLocation(shaderProgram, "enableHDR");
 
 }
 
@@ -93,27 +105,27 @@ function setSpherePositions(){
 
 function draw(){
 
-	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+	glCtx.clear(glCtx.COLOR_BUFFER_BIT | glCtx.DEPTH_BUFFER_BIT);
 	
 	for(var i = 0; i < numSpheres; i++){
 		var mMatrix = mat4.create();
 		mat4.translate(mMatrix, mMatrix, spherePositions[i]);
 		//console.log(spherePositions[i]);
 		
-		gl.uniformMatrix4fv(shaderProgram.mMatrixLocation, false, mMatrix);
-		gl.drawElements(gl.TRIANGLES, moonVertexIndexBuffer.length, gl.UNSIGNED_SHORT, 0);	
+		glCtx.uniformMatrix4fv(shaderProgram.mMatrixLocation, false, mMatrix);
+		glCtx.drawElements(glCtx.TRIANGLES, vertexIndexBuffer.length, glCtx.UNSIGNED_SHORT, 0);	
 		
 	}
 }
 
-var moonVertexPositionBuffer = [];
-var moonVertexNormalBuffer = [];
+var vertexPositionBuffer = [];
+var vertexNormalBuffer = [];
 var moonVertexTextureCoordBuffer;
-var moonVertexIndexBuffer = [];
+var vertexIndexBuffer = [];
 function initBuffers() {
 	var latitudeBands = 30;
 	var longitudeBands = 30;
-	var radius = 2;
+	var radius = 1;
 	var vertexPositionData = [];
     var normalData = [];
     var textureCoordData = [];
@@ -133,14 +145,14 @@ function initBuffers() {
         var u = 1 - (longNumber / longitudeBands);
         var v = 1 - (latNumber / latitudeBands);
 
-        moonVertexNormalBuffer.push(x);
-        moonVertexNormalBuffer.push(y);
-        moonVertexNormalBuffer.push(z);
+        vertexNormalBuffer.push(x);
+        vertexNormalBuffer.push(y);
+        vertexNormalBuffer.push(z);
         textureCoordData.push(u);
         textureCoordData.push(v);
-        moonVertexPositionBuffer.push(radius * x);
-        moonVertexPositionBuffer.push(radius * y);
-        moonVertexPositionBuffer.push(radius * z);
+        vertexPositionBuffer.push(radius * x);
+        vertexPositionBuffer.push(radius * y);
+        vertexPositionBuffer.push(radius * z);
       }
     }
 	var indexData = [];
@@ -148,13 +160,13 @@ function initBuffers() {
       for (var longNumber = 0; longNumber < longitudeBands; longNumber++) {
         var first = (latNumber * (longitudeBands + 1)) + longNumber;
         var second = first + longitudeBands + 1;
-        moonVertexIndexBuffer.push(first);
-        moonVertexIndexBuffer.push(second);
-        moonVertexIndexBuffer.push(first + 1);
+        vertexIndexBuffer.push(first);
+        vertexIndexBuffer.push(second);
+        vertexIndexBuffer.push(first + 1);
 
-        moonVertexIndexBuffer.push(second);
-        moonVertexIndexBuffer.push(second + 1);
-        moonVertexIndexBuffer.push(first + 1);
+        vertexIndexBuffer.push(second);
+        vertexIndexBuffer.push(second + 1);
+        vertexIndexBuffer.push(first + 1);
       }
     }
 	
@@ -165,56 +177,73 @@ function initBuffers() {
 	mat4.lookAt(vMatrix, [0, 0, -60], [0, 0, 0], [0, 1, 0]);
 	
 
-	gl.uniformMatrix4fv(shaderProgram.pMatrixLocation, false, pMatrix);
-    gl.uniformMatrix4fv(shaderProgram.vMatrixLocation, false, vMatrix);
+	glCtx.uniformMatrix4fv(shaderProgram.pMatrixLocation, false, pMatrix);
+    glCtx.uniformMatrix4fv(shaderProgram.vMatrixLocation, false, vMatrix);
 		
-	//console.log(moonVertexPositionBuffer);
+	//console.log(vertexPositionBuffer);
 	
-	gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.positionBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(moonVertexPositionBuffer), gl.STATIC_DRAW);
+	glCtx.bindBuffer(glCtx.ARRAY_BUFFER, shaderProgram.positionBuffer);
+	glCtx.bufferData(glCtx.ARRAY_BUFFER, new Float32Array(vertexPositionBuffer), glCtx.STATIC_DRAW);
 	
-	gl.bindBuffer(gl.ARRAY_BUFFER, shaderProgram.normalBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(moonVertexNormalBuffer), gl.STATIC_DRAW);	
+	glCtx.bindBuffer(glCtx.ARRAY_BUFFER, shaderProgram.normalBuffer);
+	glCtx.bufferData(glCtx.ARRAY_BUFFER, new Float32Array(vertexNormalBuffer), glCtx.STATIC_DRAW);	
 	
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, shaderProgram.elementBuffer);
-	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,  new Uint16Array(moonVertexIndexBuffer), gl.STATIC_DRAW);
+	glCtx.bindBuffer(glCtx.ELEMENT_ARRAY_BUFFER, shaderProgram.elementBuffer);
+	glCtx.bufferData(glCtx.ELEMENT_ARRAY_BUFFER,  new Uint16Array(vertexIndexBuffer), glCtx.STATIC_DRAW);
 }
 
-function initWebGL(canvas){
-	var context = null;
-	
+function initWebGL(){	
 	try{
-		context = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+		glCtx = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
 		//alert("WebGL initialized successfully");
+		glCtx.canvas.width = 500; //document.body.offsetWidth;
+		glCtx.canvas.height = 500; //document.body.offsetHeight;
+		glCtx.clearColor(0.0, 0.0, 0.0, 1.0);	
+		glCtx.enable(glCtx.DEPTH_TEST);
+		glCtx.depthFunc(glCtx.LEQUAL);
 	}
 	catch(e){
 		alert("Unable to use WebGL");
 	}
-	return context;
+}
+
+function initWebCL(){
+	platforms = WebCL.getPlatformIDs();
+	for ( var i in platforms ){
+		devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_DEFAULT);
+	}
+	//console.log(platforms);
+	//console.log(devices);
+	device = devices[0][0];
+	clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
+	clCQ = clCtx.createCommandQueue(devices[0][0], 0);
 }
 
 function main(){
-	var canvas = document.getElementById("myCanvas");
-	gl = initWebGL(canvas);
-	gl.canvas.width=500; //document.body.offsetWidth;
-	gl.canvas.height=500; //document.body.offsetHeight;
-	gl.clearColor(0.0, 0.0, 0.0, 1.0);	
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthFunc(gl.LEQUAL);
+	canvas = document.getElementById("myCanvas");
+	initWebGL();
+	initWebCL();
+	
+	//console.log(canvas);
+	//var imageData = clCtx.createImage2D(WebCL.CL_MEM_READ_WRITE, WebCL.CL_RGBA, 500, 500, 500*4);
+	console.log(clCtx.getSupportedImageFormats(WebCL.CL_MEM_READ_WRITE, WebCL.CL_MEM_OBJECT_IMAGE2D));
 	
 	//alert("main()");
 	
 	initShaders();	
-	gl.useProgram(shaderProgram);
+	glCtx.useProgram(shaderProgram);
 	
 	initBuffers();
 	
+	var drawTime = new Date().getTime();
 	var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
 	(function callback(){
 		requestAnimationFrame(callback);
 		if(startDraw){
 			setSpherePositions();
+			drawTime = new Date().getTime();
 			draw();
+			console.log(new Date().getTime() - drawTime +"ms");
 		}
 	})();
 	//alert("drawScene()");

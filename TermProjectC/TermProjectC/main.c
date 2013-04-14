@@ -31,10 +31,10 @@ void RenderFunction(void);
 
 int main(int argc, char* argv[])
 {
+	
+	Initialize(argc, argv);
 	InitializeCL();
-	//Initialize(argc, argv);
-
-	//glutMainLoop();
+	glutMainLoop();
 	
 	system("PAUSE");
 	exit(EXIT_SUCCESS);

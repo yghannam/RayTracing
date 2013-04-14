@@ -77,11 +77,11 @@ void CreateProgram()
 
 void InitializeCL()
 {
-	char out[12];
+	char out[13];
 	char devinfo[200];
 	cl_uint num;
 	size_t work_dim = 1;
-	cl_uint global_work_size[] = {256, 1, 1};
+	const size_t global_work_size[] = {256, 1, 1};
 	size_t ws = 256;
 
 	err = clGetPlatformIDs(1, &platform_id, NULL);
@@ -113,28 +113,29 @@ void InitializeCL()
 
 	InitBuffers();
 
-	err = clSetKernelArg(kernel, 0, sizeof(char*), output);
+	err = clSetKernelArg(kernel, 0, sizeof(char*), (void *) &output);
 	CheckError(err, "SetKernelArg");
 
 
 //	err = clGetKernelWorkGroupInfo(kernel, device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(cl_uint), (void*) &global_work_size, &num);
 //	CheckError(err, "GetKernelWorkGroupInfo");
 
-	printf("gws %d\n", global_work_size[0]);
+	//printf("gws %d\n", global_work_size[0]);
 
 	//if(cQ != NULL && kernel != NULL) printf("NOT NULL\n");
-	err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, &global_work_size[0], NULL, 0, NULL, NULL); 
+	err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL); 
 	CheckError(err, "EnqueueNDRangeKernel");
 	clFinish(cQ);
-	err = clEnqueueReadBuffer(cQ, output, 1, 0, 12, out, NULL, NULL, NULL);
+	err = clEnqueueReadBuffer(cQ, output, 1, 0, 13, out, NULL, NULL, NULL);
 	CheckError(err, "EnqueueReadBuffer");
-	printf("%s\n", out);
+	printf("%s", out);
 }
 
 void InitBuffers()
 {
 	//input = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-	output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 12, NULL, NULL);
+	output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 13, NULL, &err);
+	CheckError(err, "CreateBuffer");
 }
 
 void Initialize(int argc, char* argv[])

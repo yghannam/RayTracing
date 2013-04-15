@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <CL/cl.h>
@@ -46,7 +47,7 @@ int main(int argc, char* argv[])
 	}
 	
 	Initialize(argc, argv);
-	//InitializeCL();
+	InitializeCL();
 	glutMainLoop();
 	
 	system("PAUSE");
@@ -95,8 +96,8 @@ void InitializeCL()
 	char devinfo[200];
 	cl_uint num;
 	size_t work_dim = 1;
-	const size_t global_work_size[] = {256, 256, 1};
-	size_t ws = 256;
+	/*const size_t global_work_size[] = {256, 256, 1};
+	size_t ws = 256;*/
 
 	err = clGetPlatformIDs(1, platform_id, NULL);
 	CheckError(err, "GetPlatformIDs");
@@ -141,77 +142,49 @@ void InitializeCL()
 	err = clSetKernelArg(kernel, 0, sizeof(char*), (void *) &output);
 	CheckError(err, "SetKernelArg");
 
+	cl_uint wgs;
+	err = clGetKernelWorkGroupInfo(kernel, device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(cl_uint), (void*) &wgs, &num);
+	CheckError(err, "GetKernelWorkGroupInfo");
 
-//	err = clGetKernelWorkGroupInfo(kernel, device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(cl_uint), (void*) &global_work_size, &num);
-//	CheckError(err, "GetKernelWorkGroupInfo");
-
+	cl_uint xSize = 16;
+	cl_uint ySize = wgs/xSize;
+	size_t local_work_size[] = {xSize, ySize};
+	size_t global_work_size[] = {(cl_uint)ceil(1.0*width/local_work_size[0])*local_work_size[0],(cl_uint)ceil(1.0*height/local_work_size[1])*local_work_size[1]};
 	//printf("gws %d\n", global_work_size[0]);
 
 	//if(cQ != NULL && kernel != NULL) printf("NOT NULL\n");
-	err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, global_work_size, NULL, 0, NULL, NULL); 
+	err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL); 
 	CheckError(err, "EnqueueNDRangeKernel");
 	clFinish(cQ);
 	err = clEnqueueReadBuffer(cQ, output, 1, 0, 13, out, NULL, NULL, NULL);
 	CheckError(err, "EnqueueReadBuffer");
 	printf("%s", out);
 
-	GLuint rbo;
-	glGenRenderbuffers(1, &rbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA, 400, 300);
 	
-	//glBufferData(GL_ARRAY_BUFFER, 400, NULL, GL_STATIC_DRAW);
-	//cl_mem vbo_buff = clCreateFromGLBuffer(context, CL_MEM_WRITE_ONLY, 2, &err);
-	glFinish();
-
-	cl_mem rbo_buf = clCreateFromGLRenderbuffer(context, CL_MEM_READ_WRITE, rbo, &err);
-	CheckError(err, "CreateFromGLRenderbuffer");
-
-	/*GLuint tex;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE0, tex);
-	cl_mem tex_buf = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, */
-	err = clEnqueueAcquireGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
-	CheckError(err, "Acquire GL Objects");
+	/*err = clEnqueueAcquireGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
+	CheckError(err, "Acquire GL Objects");*/
 
 	cl_kernel colorKernel = clCreateKernel(program, "color", &err);
 	CheckError(err, "Create Color Kernel");
 
-	err = clSetKernelArg(colorKernel, 0, sizeof(cl_mem*), (void*) &rbo_buf);
+	cl_mem pixel_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
+	CheckError(err, "Create Pixel Buffer");
+
+	err = clSetKernelArg(colorKernel, 0, sizeof(cl_mem*), (void*) &pixel_buf);
 	CheckError(err, "Set Color Kernel Arg 0");
 
 	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
 	CheckError(err, "Enqueue Color Kernel");
 
 	clFinish(cQ);
+
+	err = clEnqueueReadBuffer(cQ, pixel_buf, 1, 0, width*height*4, pixels, 0, NULL, NULL);
 	
-	err = clEnqueueReleaseGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
+	/*err = clEnqueueReleaseGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
 	CheckError(err, "Release GL Objects");
 
-	clFinish(cQ);
+	clFinish(cQ);*/
 
-	GLuint fbo;
-	glGenFramebuffers(1, &fbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rbo);
-	switch(glCheckFramebufferStatus(GL_FRAMEBUFFER))
-    {
-
-        case GL_FRAMEBUFFER_COMPLETE:    printf("The fbo is complete\n"); break;
-        case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:    printf("GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT\n"); break;
-        case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:    printf("GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT\n"); break; 
-    }
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	//glReadPixels(0, 0, 300, 400, GL_RGBA, GL_RGBA32F, pixels);
-	//memset(pixels, 0, sizeof(pixels));
-	//glReadPixels(0, 0, 300, 400, GL_RGBA, GL_FLOAT, pixels);
-	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-//	glDrawPixels(300, 400, GL_RGBA, GL_FLOAT, pixels);
-	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	//int x = 0;
-	//glutSwapBuffers();
-	//glutPostRedisplay();
-	
 	
 }
 

@@ -172,14 +172,30 @@ void InitializeCL()
 	float shapeData[] = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0, 0, 1.5, 0.0, 1.0};
 	cl_mem shape_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
 	CheckError(err, "Create Shape Buffer");
-	pixel_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
+
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+
+    // Set parameters 
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0,  GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	pixel_buf = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, tex, &err); //clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
 	CheckError(err, "Create Pixel Buffer");
+
+	cl_image_format info;
+	err = clGetImageInfo(pixel_buf, CL_IMAGE_FORMAT, sizeof(cl_image_format), &info, NULL);
+	CheckError(err, "Get Image Info");
 
 	err = clSetKernelArg(colorKernel, 0, sizeof(cl_int), &numShapes);
 	CheckError(err, "Set Color Kernel Arg 0");
 	err = clSetKernelArg(colorKernel, 1, sizeof(cl_mem*), (void*) &shape_buf);
 	CheckError(err, "Set Color Kernel Arg 1");
-	err = clSetKernelArg(colorKernel, 2, sizeof(cl_mem*), (void*) &pixel_buf);
+	err = clSetKernelArg(colorKernel, 2, sizeof(cl_mem), &pixel_buf);
 	CheckError(err, "Set Color Kernel Arg 2");
 
 	err = clSetKernelArg(moveKernel, 0, sizeof(cl_int), &numShapes);
@@ -243,6 +259,19 @@ void InitWindow(int argc, char* argv[])
 	GLenum error = glewInit();
 	if(error != GLEW_OK)
 		printf("GLEW not initialized with Error %s\n", glewGetErrorString(error));
+
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+    glDisable(GL_DEPTH_TEST);
+
+    glViewport(0, 0, width, height);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(
+        60.0,
+        (GLfloat)width / (GLfloat)height,
+        0.1,
+        10.0);
 }
 
 void ResizeFunction(int Width, int Height)
@@ -255,6 +284,11 @@ void ResizeFunction(int Width, int Height)
 
 void RenderFunction(void)
 {
+	glFinish();
+
+	err = clEnqueueAcquireGLObjects(cQ, 1, &pixel_buf, 0, NULL, NULL);
+	CheckError(err, "Acquire GL Objects");
+	
 	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
 	CheckError(err, "Enqueue Color Kernel");
 
@@ -265,12 +299,61 @@ void RenderFunction(void)
 
 	clFinish(cQ);
 
-	err = clEnqueueReadBuffer(cQ, pixel_buf, 1, 0, width*height*4, pixels, 0, NULL, NULL);
+	/*err = clEnqueueReadBuffer(cQ, pixel_buf, 1, 0, width*height*4, pixels, 0, NULL, NULL);
 	CheckError(err, "Read Pixel Buffer");
 
-	glClear(GL_COLOR_BUFFER_BIT);
-	glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-    glFlush();
+	clFinish(cQ);
+*/
+	err = clEnqueueReleaseGLObjects(cQ, 1, &pixel_buf, 0, NULL, NULL);
+	CheckError(err, "Release GL Objects");
+
+	//glClear(GL_COLOR_BUFFER_BIT);
+	
+	// Bind  texture
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+	// Display image using texture
+	glDisable(GL_DEPTH_TEST);
+	glDisable(GL_LIGHTING);
+	glEnable(GL_TEXTURE_2D);
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+	glMatrixMode(GL_PROJECTION);
+	glPushMatrix();
+	glLoadIdentity();
+	glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+
+	glMatrixMode( GL_MODELVIEW);
+	glLoadIdentity();
+
+	glViewport(0, 0, width, height);
+
+	glBegin(GL_QUADS);
+
+	glTexCoord2f(0.0, 0.0);
+	glVertex3f(-1.0, -1.0, 0.5);
+
+	glTexCoord2f(1.0, 0.0);
+	glVertex3f(1.0, -1.0, 0.5);
+
+	glTexCoord2f(1.0, 1.0);
+	glVertex3f(1.0, 1.0, 0.5);
+
+	glTexCoord2f(0.0, 1.0);
+	glVertex3f(-1.0, 1.0, 0.5);
+
+	glEnd();
+
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+
+	glDisable(GL_TEXTURE_2D);
+	glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+	
+	//glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    //glFlush();
+	//SwapBuffers();
 	glutSwapBuffers();
 	glutPostRedisplay();
 }

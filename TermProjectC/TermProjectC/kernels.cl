@@ -229,7 +229,7 @@ __kernel void clearRaster(
 __kernel void getPixelColor(
 	const int numShapes,
 	__global float4 *shapeData,
-	__global uchar4 *raster){
+	__write_only image2d_t raster){
 	
 		if(DEBUG)
 		{
@@ -260,7 +260,7 @@ __kernel void getPixelColor(
 		worldRay.o = eye;
 		worldRay.d = transformRayDirection(localDirection, U, V, W);
 
-		uchar4 color = (uchar4)(0, 128, 0, 255);
+		float4 color = (float)(0.f, 128.f, 0.f, 255.f);
 
 		float3 lightDir = (float3)(-1.f, -1.f, -1.f);
 	
@@ -279,14 +279,16 @@ __kernel void getPixelColor(
 			//printf("reflect: %2.2f\n", intersection.reflect);
 
 			float3 Intensity = clamp(dot(intersection.N, normalize(lightDir)), 0.f, 1.f) + clamp(dot(intersection.N, normalize(-lightDir)), 0.f, 1.f);
-
-			uchar red = (uchar) round(255*Intensity.x);
-			uchar green = (uchar) round(255*Intensity.y);
-			uchar blue = (uchar) round(255*Intensity.z);
-			color = (uchar4)(red, green, blue, 255);
+/*
+			float red = round(255.f*Intensity.x);
+			float green = round(255.f*Intensity.y);
+			float blue = round(255.f*Intensity.z);*/
+			color = (float4)(Intensity, 1.f);
 			}
 	
-		raster[row * columns + col] = color;		
+		//printf("Color %v4d\n", color);
+		write_imagef(raster, (int2)(col, row), color);
+		//raster[row * columns + col] = color;		
 }
 
 __kernel void moveShapes(

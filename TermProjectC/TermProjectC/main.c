@@ -168,8 +168,8 @@ void InitializeCL()
 	/*err = clEnqueueAcquireGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
 	CheckError(err, "Acquire GL Objects");*/
 
-	int numShapes = 2;
-	float shapeData[] = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0};
+	int numShapes = 3;
+	float shapeData[] = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0, 0, 1.5, 0.0, 1.0};
 	cl_mem shape_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
 	CheckError(err, "Create Shape Buffer");
 	pixel_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);

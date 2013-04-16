@@ -269,37 +269,22 @@ __kernel void getPixelColor(
 		ray.d = worldRay.d;
 		
 		Intersection intersection;	
-		intersection 
-			= intersect(true, ray, numShapes, shapeData);	
-		
-		if (false){//intersection.t < INFINITY){
 
-			float3 Intensity = clamp(dot(intersection.N, normalize(lightDir)), 0.f, 1.f);
+
+		intersection 
+			= intersect(false, ray, numShapes, shapeData);	
+
+		if (intersection.t < INFINITY)
+		{				
+			//printf("reflect: %2.2f\n", intersection.reflect);
+
+			float3 Intensity = clamp(dot(intersection.N, normalize(lightDir)), 0.f, 1.f) + clamp(dot(intersection.N, normalize(-lightDir)), 0.f, 1.f);
 
 			uchar red = (uchar) round(255*Intensity.x);
 			uchar green = (uchar) round(255*Intensity.y);
 			uchar blue = (uchar) round(255*Intensity.z);
 			color = (uchar4)(red, green, blue, 255);
-
-		}
-		else
-		{
-			intersection 
-				= intersect(false, ray, numShapes, shapeData);	
-
-			if (intersection.t < INFINITY){
-				
-				//printf("reflect: %2.2f\n", intersection.reflect);
-
-				float3 Intensity = clamp(dot(intersection.N, normalize(lightDir)), 0.f, 1.f) + clamp(dot(intersection.N, normalize(-lightDir)), 0.f, 1.f);
-
-
-				uchar red = (uchar) round(255*Intensity.x);
-				uchar green = (uchar) round(255*Intensity.y);
-				uchar blue = (uchar) round(255*Intensity.z);
-				color = (uchar4)(red, green, blue, 255);
 			}
-		}
 	
 		raster[row * columns + col] = color;		
 }
@@ -319,6 +304,13 @@ __kernel void moveShapes(
 			else
 				shapeData[i].x -= 0.1;
 		}
+		else if(i > 0 && i%2 == 0)
+		{
+			if(shapeData[i].w == -1.f)
+				shapeData[i].y += 0.1;
+			else
+				shapeData[i].y -= 0.1;
+		}
 		else
 		{
 			if(shapeData[i].w == -1.f)
@@ -327,7 +319,7 @@ __kernel void moveShapes(
 				shapeData[i].x -= 0.1;
 		}
 
-		if(shapeData[i].x > 3.f || shapeData[i].x < -3.f)
+		if(shapeData[i].x > 3.f || shapeData[i].x < -3.f || shapeData[i].y > 3.f)
 			shapeData[i].w *= -1.f;
 	}
 }

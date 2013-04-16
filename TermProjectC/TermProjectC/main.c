@@ -24,6 +24,12 @@ cl_command_queue cQ;
 cl_program program;
 cl_kernel kernel;
 cl_mem input, output;
+cl_kernel colorKernel;
+cl_kernel moveKernel;
+cl_uint work_group_size;
+size_t local_work_size[2];
+size_t global_work_size[2];
+cl_mem pixel_buf;
 
 void Initialize(int, char*[]);
 void InitializeCL(void);
@@ -36,16 +42,6 @@ void RenderFunction(void);
 
 int main(int argc, char* argv[])
 {
-	int size = 400*300*4;
-
-
-	for(int i = 0; i < size; i+=4){
-		pixels[i] = 0;
-		pixels[i+1] = 255;
-		pixels[i+2] = 255;
-		pixels[i+3] = 255;
-	}
-	
 	Initialize(argc, argv);
 	InitializeCL();
 	glutMainLoop();
@@ -95,27 +91,25 @@ void InitializeCL()
 	char out[13];
 	char devinfo[200];
 	cl_uint num;
-	size_t work_dim = 1;
-	/*const size_t global_work_size[] = {256, 256, 1};
-	size_t ws = 256;*/
+	
 
 	err = clGetPlatformIDs(1, platform_id, NULL);
 	CheckError(err, "GetPlatformIDs");
 	//printf("%d\n", platform_id);
 	err = clGetDeviceIDs(platform_id[0], CL_DEVICE_TYPE_GPU, 1, device_id, &num);
-	printf("Number of devices is %d\n", num);
-	printf("Device id %d\n", device_id[0]);
+	//printf("Number of devices is %d\n", num);
+	//printf("Device id %d\n", device_id[0]);
 	CheckError(err, "GetDeviceIDs");
 
 
-	err = clGetDeviceInfo(device_id[0], CL_DEVICE_NAME, 200, devinfo, NULL);
-	CheckError(err, "GetDeviceInfo");
-	printf("%d %s \n", device_id, devinfo);
+	//err = clGetDeviceInfo(device_id[0], CL_DEVICE_NAME, 200, devinfo, NULL);
+	//CheckError(err, "GetDeviceInfo");
+	//printf("%d %s \n", device_id, devinfo);
 
-	cl_bool image_support;
-	err = clGetDeviceInfo(device_id[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(cl_bool), &image_support, NULL);
-	CheckError(err, "GetDeviceInfo");
-	printf("Device Image Support %d\n", image_support);
+	//cl_bool image_support;
+	//err = clGetDeviceInfo(device_id[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(cl_bool), &image_support, NULL);
+	//CheckError(err, "GetDeviceInfo");
+	//printf("Device Image Support %d\n", image_support);
 
 	cl_context_properties properties[7] = {
 		CL_GL_CONTEXT_KHR, (cl_context_properties) wglGetCurrentContext(),
@@ -134,51 +128,68 @@ void InitializeCL()
 	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
 	CheckError(err, "BuildProgram");
 
-	kernel = clCreateKernel(program, "hello", &err);
-	CheckError(err, "CreateKernel");
+	/*kernel = clCreateKernel(program, "hello", &err);
+	CheckError(err, "CreateKernel");*/
 
 	InitBuffers();
 
-	err = clSetKernelArg(kernel, 0, sizeof(char*), (void *) &output);
+	/*err = clSetKernelArg(kernel, 0, sizeof(char*), (void *) &output);
 	CheckError(err, "SetKernelArg");
+*/
+	colorKernel = clCreateKernel(program, "getPixelColor", &err);
+	CheckError(err, "Create Color Kernel");
 
-	cl_uint wgs;
-	err = clGetKernelWorkGroupInfo(kernel, device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(cl_uint), (void*) &wgs, &num);
+	moveKernel = clCreateKernel(program, "moveShapes", &err);
+	CheckError(err, "Create Move Kernel");
+
+	
+	err = clGetKernelWorkGroupInfo(colorKernel, device_id[0], CL_KERNEL_WORK_GROUP_SIZE, sizeof(cl_uint), (void*) &work_group_size, &num);
 	CheckError(err, "GetKernelWorkGroupInfo");
 
-	cl_uint xSize = 16;
-	cl_uint ySize = wgs/xSize;
-	size_t local_work_size[] = {xSize, ySize};
-	size_t global_work_size[] = {(cl_uint)ceil(1.0*width/local_work_size[0])*local_work_size[0],(cl_uint)ceil(1.0*height/local_work_size[1])*local_work_size[1]};
+	cl_uint xSize = (cl_uint)floor(sqrt(1.0*work_group_size));
+	cl_uint ySize = (cl_uint)floor(1.0*work_group_size/xSize);
+	local_work_size[0] = xSize;
+	local_work_size[1] = ySize;
+	global_work_size[0] = (cl_uint)ceil(1.0*width/local_work_size[0])*local_work_size[0];
+	global_work_size[1] = (cl_uint)ceil(1.0*height/local_work_size[1])*local_work_size[1];
 	//printf("gws %d\n", global_work_size[0]);
 
 	//if(cQ != NULL && kernel != NULL) printf("NOT NULL\n");
-	err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL); 
+	/*err = clEnqueueNDRangeKernel(cQ, kernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL); 
 	CheckError(err, "EnqueueNDRangeKernel");
+
 	clFinish(cQ);
+
 	err = clEnqueueReadBuffer(cQ, output, 1, 0, 13, out, NULL, NULL, NULL);
 	CheckError(err, "EnqueueReadBuffer");
-	printf("%s", out);
+	printf("%s", out);*/
 
 	
 	/*err = clEnqueueAcquireGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
 	CheckError(err, "Acquire GL Objects");*/
 
-	cl_kernel colorKernel = clCreateKernel(program, "color", &err);
-	CheckError(err, "Create Color Kernel");
-
-	cl_mem pixel_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
+	int numShapes = 2;
+	float shapeData[] = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0};
+	cl_mem shape_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
+	CheckError(err, "Create Shape Buffer");
+	pixel_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
 	CheckError(err, "Create Pixel Buffer");
 
-	err = clSetKernelArg(colorKernel, 0, sizeof(cl_mem*), (void*) &pixel_buf);
+	err = clSetKernelArg(colorKernel, 0, sizeof(cl_int), &numShapes);
 	CheckError(err, "Set Color Kernel Arg 0");
+	err = clSetKernelArg(colorKernel, 1, sizeof(cl_mem*), (void*) &shape_buf);
+	CheckError(err, "Set Color Kernel Arg 1");
+	err = clSetKernelArg(colorKernel, 2, sizeof(cl_mem*), (void*) &pixel_buf);
+	CheckError(err, "Set Color Kernel Arg 2");
 
-	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, NULL, 0, NULL, NULL);
-	CheckError(err, "Enqueue Color Kernel");
+	err = clSetKernelArg(moveKernel, 0, sizeof(cl_int), &numShapes);
+	CheckError(err, "Set Move Kernel Arg 0");
+	err = clSetKernelArg(moveKernel, 1, sizeof(cl_mem*), (void*) &shape_buf);
+	CheckError(err, "Set Move Kernel Arg 1");
 
-	clFinish(cQ);
+	err = clEnqueueWriteBuffer(cQ, shape_buf, 1, 0, numShapes*4*4, shapeData, 0, NULL, NULL);
+	CheckError(err, "Write Shape Data");
 
-	err = clEnqueueReadBuffer(cQ, pixel_buf, 1, 0, width*height*4, pixels, 0, NULL, NULL);
 	
 	/*err = clEnqueueReleaseGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
 	CheckError(err, "Release GL Objects");
@@ -208,47 +219,13 @@ void Initialize(int argc, char* argv[])
 	glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
-void CreateTexture()
-{
-	int wrap = 1;
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	// when texture area is small, bilinear filter the closest mipmap
-    glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
-                     GL_LINEAR_MIPMAP_NEAREST );
-    // when texture area is large, bilinear filter the first mipmap
-    glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-
-    // if wrap is true, the texture wraps over at the edges (repeat)
-    //       ... false, the texture ends at the edges (clamp)
-    glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,
-                     wrap ? GL_REPEAT : GL_CLAMP );
-    glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,
-                     wrap ? GL_REPEAT : GL_CLAMP );
-	gluBuild2DMipmaps(GL_TEXTURE_2D, 4, 400, 300, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-}
-
 void InitWindow(int argc, char* argv[])
 {
 	glutInit(&argc, argv);
 	
-	
-	
-	//glutInitContextVersion(4, 2);
-	//glutInitContextFlags(GLUT_FORWARD_COMPATIBLE);
-	//glutInitContextProfile(GLUT_CORE_PROFILE);
-
-	/*glutSetOption(
-		GLUT_ACTION_ON_WINDOW_CLOSE,
-		GLUT_ACTION_GLUTMAINLOOP_RETURNS
-	);*/
-	
 	glutInitWindowSize(width, height);
 
-	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-	
-	/*glEnable(GL_TEXTURE_2D);
-	CreateTexture();*/
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);	
 
 	WindowHandle = glutCreateWindow(WINDOW_TITLE_PREFIX);
 
@@ -262,8 +239,6 @@ void InitWindow(int argc, char* argv[])
 
 	//glutReshapeFunc(ResizeFunction);
 	glutDisplayFunc(RenderFunction);
-
-	//glEnable(GL_DEPTH_TEST);
 
 	GLenum error = glewInit();
 	if(error != GLEW_OK)
@@ -280,22 +255,22 @@ void ResizeFunction(int Width, int Height)
 
 void RenderFunction(void)
 {
+	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+	CheckError(err, "Enqueue Color Kernel");
+
+	clFinish(cQ);
+
+	err = clEnqueueNDRangeKernel(cQ, moveKernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+	CheckError(err, "Enqueue Move Kernel");
+
+	clFinish(cQ);
+
+	err = clEnqueueReadBuffer(cQ, pixel_buf, 1, 0, width*height*4, pixels, 0, NULL, NULL);
+	CheckError(err, "Read Pixel Buffer");
+
 	glClear(GL_COLOR_BUFFER_BIT);
 	glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     glFlush();
 	glutSwapBuffers();
-	//glRasterPos2i(0, 0);
-	//glDrawPixels(400, 300, GL_RGBA, GL_UNSIGNED_BYTE, (void*) &pixels);
-	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-	/*glBindTexture(GL_TEXTURE_2D, tex);
-	glBegin( GL_QUADS );
-	glTexCoord2d(0.0,0.0); glVertex2d(0.0,0.0);
-	glTexCoord2d(1.0,0.0); glVertex2d(1.0,0.0);
-	glTexCoord2d(1.0,1.0); glVertex2d(1.0,1.0);
-	glTexCoord2d(0.0,1.0); glVertex2d(0.0,1.0);
-	glEnd();
-	glFlush();
-	glutSwapBuffers();
-	glutPostRedisplay();*/
+	glutPostRedisplay();
 }

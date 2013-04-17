@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <CL/cl.h>
@@ -169,9 +170,18 @@ void InitializeCL()
 	CheckError(err, "Acquire GL Objects");*/
 
 	int numShapes = 3;
-	float shapeData[] = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0, 0, 1.5, 0.0, 1.0};
+	float* shapeData = (float*)calloc(4*numShapes, sizeof(float));//[4*numShapes]; = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0, 0, 1.5, 0.0, 1.0};
+	float* shapeVec = (float*)calloc(4*numShapes, sizeof(float));//[4*numShapes] = {1.0, -1.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0};
+	srand (time(NULL));
+	for(int i = 0; i < 4*numShapes; i++)
+	{
+		shapeData[i] = 1.0*rand()/RAND_MAX;
+		shapeVec[i] = 1.0*rand()/RAND_MAX;
+	}
 	cl_mem shape_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
 	CheckError(err, "Create Shape Buffer");
+	cl_mem shapeVec_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
+	CheckError(err, "Create ShapeVec Buffer");
 
 	glGenTextures(1, &tex);
 	glBindTexture(GL_TEXTURE_2D, tex);
@@ -202,9 +212,14 @@ void InitializeCL()
 	CheckError(err, "Set Move Kernel Arg 0");
 	err = clSetKernelArg(moveKernel, 1, sizeof(cl_mem*), (void*) &shape_buf);
 	CheckError(err, "Set Move Kernel Arg 1");
+	err = clSetKernelArg(moveKernel, 2, sizeof(cl_mem*), (void*) &shapeVec_buf);
+	CheckError(err, "Set Move Kernel Arg 2");
 
 	err = clEnqueueWriteBuffer(cQ, shape_buf, 1, 0, numShapes*4*4, shapeData, 0, NULL, NULL);
 	CheckError(err, "Write Shape Data");
+
+	err = clEnqueueWriteBuffer(cQ, shapeVec_buf, 1, 0, numShapes*4*4, shapeVec, 0, NULL, NULL);
+	CheckError(err, "Write Shape Vector Data");
 
 	
 	/*err = clEnqueueReleaseGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);

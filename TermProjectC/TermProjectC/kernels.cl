@@ -402,35 +402,42 @@ __kernel void getPixelColor(
 
 __kernel void moveShapes(
 	const int numShapes,
-	__global float4 *shapeData)
+	__global float4 *shapeData,
+	__global float4 *shapeVector)
 {
 	int i = get_global_id(0);
 
 	if(i < numShapes)
 	{
-		if(i%2 == 0)
-		{
-			if(shapeData[i].w == 1.f)
-				shapeData[i].x += 0.1f;
-			else
-				shapeData[i].x -= 0.1f;
-		}
-		else if(i > 0 && i%2 == 0)
-		{
-			if(shapeData[i].w == -1.f)
-				shapeData[i].y += 0.1f;
-			else
-				shapeData[i].y -= 0.1f;
-		}
-		else
-		{
-			if(shapeData[i].w == -1.f)
-				shapeData[i].x += 0.1f;
-			else
-				shapeData[i].x -= 0.1f;
-		}
 
-		if(shapeData[i].x > 3.f || shapeData[i].x < -3.f || shapeData[i].y > 3.f)
-			shapeData[i].w *= -1.f;
+		if(shapeData[i].x >= 3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(-1.f, 0.f, 0.f), shapeVector[i].xyz);
+		}
+		else if(shapeData[i].x <= -3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(1.f, 0.f, 0.f), shapeVector[i].xyz);
+		}
+		else if(shapeData[i].y >= 3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(0.f, -1.f, 0.f), shapeVector[i].xyz);
+		}
+		else if(shapeData[i].y <= -3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(0.f, 1.f, 0.f), shapeVector[i].xyz);
+		}
+		else if(shapeData[i].z >= 3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, -1.f), shapeVector[i].xyz);
+		}
+		else if(shapeData[i].z <= -3.f)
+		{
+			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, 1.f), shapeVector[i].xyz);
+		}
+			
+
+		float rate = 0.1f;
+		shapeData[i] += rate * shapeVector[i];
+		
 	}
 }

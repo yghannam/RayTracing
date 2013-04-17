@@ -106,9 +106,9 @@ void InitializeCL()
 	//CheckError(err, "GetDeviceInfo");
 	//printf("%d %s \n", device_id, devinfo);
 
-	//cl_bool image_support;
-	//err = clGetDeviceInfo(device_id[0], CL_DEVICE_IMAGE_SUPPORT, sizeof(cl_bool), &image_support, NULL);
-	//CheckError(err, "GetDeviceInfo");
+	/*cl_uint info;
+	err = clGetDeviceInfo(device_id[0], CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT, sizeof(cl_uint), &info, NULL);
+	CheckError(err, "GetDeviceInfo");*/
 	//printf("Device Image Support %d\n", image_support);
 
 	cl_context_properties properties[7] = {
@@ -187,9 +187,9 @@ void InitializeCL()
 	pixel_buf = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, tex, &err); //clCreateBuffer(context, CL_MEM_READ_WRITE, width*height*4, NULL, &err);
 	CheckError(err, "Create Pixel Buffer");
 
-	cl_image_format info;
+	/*cl_image_format info;
 	err = clGetImageInfo(pixel_buf, CL_IMAGE_FORMAT, sizeof(cl_image_format), &info, NULL);
-	CheckError(err, "Get Image Info");
+	CheckError(err, "Get Image Info");*/
 
 	err = clSetKernelArg(colorKernel, 0, sizeof(cl_int), &numShapes);
 	CheckError(err, "Set Color Kernel Arg 0");

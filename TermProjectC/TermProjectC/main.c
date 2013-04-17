@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
 {
 	printf("How many shapes to display? ");
 	scanf("%d", &numShapes);
-	printf("Acceraltion scheme? [0] [1] [2]: ");
+	printf("Acceraltion scheme? [0] [1]: ");
 	scanf("%d", &acceleration);
 
 	Initialize(argc, argv);

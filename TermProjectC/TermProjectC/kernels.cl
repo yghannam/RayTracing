@@ -177,7 +177,7 @@ Intersection intersect(
 			//activeArray[shapeIndexArray[i]] = entryArray[i];			
 
 			float t;
-			for(t = tArray[i-1]; t < tArray[i]; t += 0.1f)
+			for(t = tArray[i-1]; t < tArray[i]; t += 0.05f)
 			{
 				// Calculate density from active list
 				float total_density = 0.f;
@@ -262,7 +262,7 @@ Intersection intersect(
 				intersection.t = t;
 				break;
 			}	
-			t += 0.01f;
+			t += 0.05f;
 		}
 	}
 	
@@ -328,28 +328,34 @@ __kernel void moveShapes(
 	if(i < numShapes)
 	{
 
-		if(shapeData[i].x >= MAXDIM)
+		if(shapeData[i].x > MAXDIM)
 		{
+			shapeData[i].x = MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(-1.f, 0.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].x <= -MAXDIM)
+		else if(shapeData[i].x < -MAXDIM)
 		{
+			shapeData[i].x = -MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(1.f, 0.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].y >= MAXDIM)
+		else if(shapeData[i].y > MAXDIM)
 		{
+			shapeData[i].y = MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(0.f, -1.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].y <= -MAXDIM)
+		else if(shapeData[i].y < -MAXDIM)
 		{
+			shapeData[i].y = -MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(0.f, 1.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].z >= MAXDIM)
+		else if(shapeData[i].z > MAXDIM)
 		{
+			shapeData[i].z = MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, -1.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].z <= -MAXDIM)
+		else if(shapeData[i].z < -MAXDIM)
 		{
+			shapeData[i].z = -MAXDIM;
 			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, 1.f), shapeVector[i].xyz);
 		}
 

@@ -1,29 +1,11 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 
-#define Pi 3.14159265358979323846f
-#define EPSILON 0.01
+#define EPSILON 0.01f
 #define DEBUG 0
-#define NUMSHAPES 3
+//#define NUMSHAPES 3
 #define ACCELERATED 1
-
-__constant char hw[] = "Hello World\n\0";
-
-__kernel void hello(__global char * out)
-{
-size_t tid = get_global_id(0);
-out[tid] = hw[tid];
-}
-
-__kernel void color(__global uchar4 *pixel)
-{
-	const int col = get_global_id(0);
-	const int row = get_global_id(1);
-	int index =  row * 400 + col;
-	pixel[index].xyz = 128;
-	pixel[index].w = 255;
-	//printf("pixel = %v4d\n", pixel[index]);
-}
-
+#define MAXDIM 3
+#define CORERADIUS 1
 
 typedef struct {
 	float3 d;
@@ -42,55 +24,6 @@ typedef struct{
 	float3 N;
 	float density;
 }Intersection;
-
-
-float rayPlane(
-	Ray ray, 
-	float3 normal,
-	float3 point){
-		float t = INFINITY;		
-		float rayNormal = dot(ray.d, normal);
-		if( rayNormal != 0){
-			t = dot(point-ray.o, normal)/rayNormal;
-		}		
-		return (t>0) ? t : INFINITY;
-	}
-	
-float3 rayTriangle(
-	Ray ray, 
-	float3 p0,
-	float3 p1,
-	float3 p2){
-	float t = INFINITY;
-	
-	/*
-	float3 normal = cross(p1-p0, p2-p0);
-	t = rayPlane(rayOrigin, rayDirection, normal, p0);
-	if(t > 0){
-		float3 p = rayOrigin + t*rayDirection;
-		float normalSquared = dot(normal, normal);
-		float alpha = dot(normal, cross(p-p0, p2-p0))/normalSquared;
-		float beta = dot(normal, cross(p1-p0, p-p0))/normalSquared;
-		
-		if(alpha < 0 || beta < 0 || alpha+beta > 1){
-t = 0;
-		}
-	}
-	*/
-	float3 e1 = p1-p0;
-	float3 e2 = p2-p0;
-	float3 s = ray.o-p0;
-	float invDet = 1.0f / dot(cross(ray.d, e2), e1);
-	t = invDet * dot(cross(s, e1), e2);
-	float alpha = invDet * dot(cross(ray.d, e2), s);
-	float beta = invDet * dot(cross(s, e1), ray.d);
-	
-	if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
-		t = INFINITY;
-	}
-	
-	return (float3)(t, alpha, beta);
-}
 
 float raySphere(
 	Ray ray, 
@@ -145,15 +78,13 @@ float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W
 Intersection intersect(
 	Ray ray,
 	int numShapes, 
-	__global float4 *shapeData){
-	
+	__global float4 *shapeData){	
 
 	Intersection intersection;
 	intersection.t = INFINITY;	
 
 	if(ACCELERATED)
 	{
-
 		// Intersect with all shapes
 		float tArray[2*NUMSHAPES];
 		int shapeIndexArray[2*NUMSHAPES];
@@ -164,26 +95,19 @@ Intersection intersect(
 		{
 			Sphere sphere;
 			sphere.c = shapeData[i].xyz;
-			sphere.r = 2;
+			sphere.r = 2*CORERADIUS;
 
 			float rv = raySphere(ray, sphere, false);
 			tArray[2*i] = rv > EPSILON ? rv : INFINITY;
 			shapeIndexArray[2*i] = i;
 			entryArray[2*i] = 1;
 
-			/*if(rv != INFINITY)
-				printf("rv: %f\n", rv);*/
-
 			rv = raySphere(ray, sphere, true);
 			tArray[2*i+1] = rv > EPSILON ? rv : INFINITY;
 			shapeIndexArray[2*i+1] = i;
 			entryArray[2*i+1] = 0;
 
-			/*if(rv != INFINITY)
-				printf("rv: %f\n", rv);*/
-			//printf("%x\n", i);
 		}
-		//tArray[5] = 5.f;
 	
 
 		// Sort intersection by t (distance)
@@ -218,12 +142,8 @@ Intersection intersect(
 			}
 
 		}
-		/*if(tArray[3] > 0.f)
-			printf("%f %f %f %f %f %f\n", tArray[0], tArray[1], tArray[2], tArray[3], tArray[4], tArray[5]);*/
 
 		// Step along ray
-		
-
 		bool activeArray[NUMSHAPES];
 		activeArray[shapeIndexArray[0]] = entryArray[0] == 1 ? true:false;
 		for(i = 1; i < 2*numShapes; i++)
@@ -237,8 +157,6 @@ Intersection intersect(
 			float t;
 			for(t = tArray[i-1]; t < tArray[i]; t += 0.05f)
 			{
-				//if(t == INFINITY) printf("%d\n", i);
-
 				// Calculate density from active list
 				float total_density = 0.f;
 				float3 pos = ray.o + t * ray.d;
@@ -258,17 +176,14 @@ Intersection intersect(
 				intersection.N.x /= total_density;
 				intersection.N.y /= total_density;
 				intersection.N.z /= total_density;
-				//printf("j: %d t: %2.2f density: %2.2f\n", j, t, density);
-				if(total_density > 1.f)
+
+				if(total_density >= CORERADIUS)
 				{ 
-					//printf("%d %v3f \n", j, intersection.P);
-					//printf("j: %d t: %f density: %f\n", j, t, density);
+					
 					intersection.t = t;
 					i = 2*numShapes;
 					break;
-				}	
-				
-				//t += 0.01f;
+				}					
 			}
 		}
 
@@ -307,46 +222,26 @@ Intersection intersect(
 			intersection.N.x /= total_density;
 			intersection.N.y /= total_density;
 			intersection.N.z /= total_density;
-			//printf("j: %d t: %2.2f density: %2.2f\n", j, t, density);
+
 			if(total_density > 0.7f)
 			{ 
-				//printf("%d %v3f \n", j, intersection.P);
-				//printf("j: %d t: %f density: %f\n", j, t, density);
-				
 				break;
 			}	
+
 			intersection.t = t;
 			t += 0.01f;
 		}
-
-		/*if(density < 0.5f)
-			intersection.t = INFINITY;*/
 	}
 	
 	
 	return intersection;
 }
 
-__kernel void clearRaster(
-	const int columns,
-	__global uchar4 *raster){
-		const int col = get_global_id(0);
-		const int row = get_global_id(1);
-		raster[row * columns + col] = (uchar4)(0,0,0,255);
-	}
-
 __kernel void getPixelColor(
 	const int numShapes,
 	__global float4 *shapeData,
 	__write_only image2d_t raster){
 	
-		/*if(DEBUG)
-		{
-			printf("Number of shapes: %d\n", numShapes);
-			printf("Shape data: %2.2v4f %2.2v4f\n", shapeData[0], shapeData[1]);
-			return;
-		}*/
-
 		const int col = get_global_id(0);
 		const int row = get_global_id(1);
 		int columns = 400;
@@ -354,7 +249,7 @@ __kernel void getPixelColor(
 		float width = 1.f;
 		float height = width * rows / columns;
 
-		float3 eye = (float3)(0.f, 0.f, -10.f);
+		float3 eye = (float3)(0.f, 0.f, -12.f);
 		float3 W = normalize(eye);
 		float3 up = (float3)(0.f, 1.f, 0.f);
 		float3 U = normalize(cross(up, W));
@@ -378,26 +273,16 @@ __kernel void getPixelColor(
 		ray.d = worldRay.d;
 		
 		Intersection intersection;	
-
-
 		intersection 
 			= intersect(ray, numShapes, shapeData);	
 
 		if (intersection.t < INFINITY)
-		{				
-			//printf("reflect: %2.2f\n", intersection.reflect);
-
+		{	
 			float3 Intensity = clamp(dot(intersection.N, normalize(lightDir)), 0.f, 1.f) + clamp(dot(intersection.N, normalize(-lightDir)), 0.f, 1.f);
-/*
-			float red = round(255.f*Intensity.x);
-			float green = round(255.f*Intensity.y);
-			float blue = round(255.f*Intensity.z);*/
 			color = (float4)(Intensity, 1.f);
 		}
 	
-		//printf("Color %v4d\n", color);
 		write_imagef(raster, (int2)(col, row), color);
-		//raster[row * columns + col] = color;		
 }
 
 __kernel void moveShapes(
@@ -410,34 +295,32 @@ __kernel void moveShapes(
 	if(i < numShapes)
 	{
 
-		if(shapeData[i].x >= 3.f)
+		if(shapeData[i].x >= MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(-1.f, 0.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].x <= -3.f)
+		else if(shapeData[i].x <= -MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(1.f, 0.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].y >= 3.f)
+		else if(shapeData[i].y >= MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(0.f, -1.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].y <= -3.f)
+		else if(shapeData[i].y <= -MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(0.f, 1.f, 0.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].z >= 3.f)
+		else if(shapeData[i].z >= MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, -1.f), shapeVector[i].xyz);
 		}
-		else if(shapeData[i].z <= -3.f)
+		else if(shapeData[i].z <= -MAXDIM)
 		{
 			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, 1.f), shapeVector[i].xyz);
 		}
-			
 
 		float rate = 0.1f;
-		shapeData[i] += rate * shapeVector[i];
-		
+		shapeData[i] += rate * shapeVector[i];		
 	}
 }

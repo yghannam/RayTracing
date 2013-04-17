@@ -14,7 +14,9 @@ int width = 400,
 	height = 300,
 	WindowHandle = 0;
 
-unsigned char pixels[400*300*4];
+int numShapes = 5;
+
+unsigned char *pixels;
 GLuint tex; 
 
 cl_int err;
@@ -43,6 +45,9 @@ void RenderFunction(void);
 
 int main(int argc, char* argv[])
 {
+	printf("How many shapes to display? ");
+	scanf("%d", &numShapes);
+
 	Initialize(argc, argv);
 	InitializeCL();
 	glutMainLoop();
@@ -126,7 +131,11 @@ void InitializeCL()
 
 	CreateProgram();
 
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+	char buildOptions[20];
+	sprintf(buildOptions, "-D NUMSHAPES=%d", numShapes);
+	//printf("%s\n", buildOptions);
+
+	err = clBuildProgram(program, 0, NULL, buildOptions, NULL, NULL);
 	CheckError(err, "BuildProgram");
 
 	/*kernel = clCreateKernel(program, "hello", &err);
@@ -169,14 +178,18 @@ void InitializeCL()
 	/*err = clEnqueueAcquireGLObjects(cQ, 1, &rbo_buf, 0, NULL, NULL);
 	CheckError(err, "Acquire GL Objects");*/
 
-	int numShapes = 3;
-	float* shapeData = (float*)calloc(4*numShapes, sizeof(float));//[4*numShapes]; = {1.5, 0.0, 0.0, 1.0, -1.5, 0.0, 0.0, 1.0, 0, 1.5, 0.0, 1.0};
-	float* shapeVec = (float*)calloc(4*numShapes, sizeof(float));//[4*numShapes] = {1.0, -1.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0};
+
+	float* shapeData = (float*)calloc(4*numShapes, sizeof(float));
+	float* shapeVec = (float*)calloc(4*numShapes, sizeof(float));
 	srand (time(NULL));
-	for(int i = 0; i < 4*numShapes; i++)
+	for(int i = 0; i < 4*numShapes*10; i++)
 	{
-		shapeData[i] = 1.0*rand()/RAND_MAX;
-		shapeVec[i] = 1.0*rand()/RAND_MAX;
+		int random = rand();
+		if(i % 10 == 0)
+		{
+			shapeData[i/10] = 1.0*random/RAND_MAX;
+			shapeVec[i/10] = 1.0*random/RAND_MAX;
+		}
 	}
 	cl_mem shape_buf = clCreateBuffer(context, CL_MEM_READ_WRITE, numShapes*4*4, NULL, &err);
 	CheckError(err, "Create Shape Buffer");
@@ -243,9 +256,12 @@ void Initialize(int argc, char* argv[])
 	
 	fprintf(
 		stdout,
-		"INFO: OpenGL Version: %s\n",
+		"\nINFO: OpenGL Version: %s\n",
 		glGetString(GL_VERSION)
 	);
+
+
+	pixels = (unsigned char*)calloc(width*height*4, sizeof(unsigned char));
 
 	glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 }

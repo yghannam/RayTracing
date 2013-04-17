@@ -3,8 +3,9 @@
 #define EPSILON 0.01f
 #define DEBUG 0
 //#define NUMSHAPES 3
-#define ACCELERATED 1
-#define MAXDIM 3
+//#define ACCELERATION 1
+//#define MAXDIM 10
+#define RATE 0.1f
 #define CORERADIUS 1
 
 typedef struct {
@@ -83,12 +84,13 @@ Intersection intersect(
 	Intersection intersection;
 	intersection.t = INFINITY;	
 
-	if(ACCELERATED)
+	if(ACCELERATION == 1)
 	{
+		bool hasIntersection = false;
 		// Intersect with all shapes
 		float tArray[2*NUMSHAPES];
 		int shapeIndexArray[2*NUMSHAPES];
-		int entryArray[2*NUMSHAPES];
+		bool entryArray[2*NUMSHAPES];
 
 		int i = 0;
 		for (i = 0; i < numShapes; i++)
@@ -100,15 +102,21 @@ Intersection intersect(
 			float rv = raySphere(ray, sphere, false);
 			tArray[2*i] = rv > EPSILON ? rv : INFINITY;
 			shapeIndexArray[2*i] = i;
-			entryArray[2*i] = 1;
+			entryArray[2*i] = true;
 
 			rv = raySphere(ray, sphere, true);
 			tArray[2*i+1] = rv > EPSILON ? rv : INFINITY;
 			shapeIndexArray[2*i+1] = i;
-			entryArray[2*i+1] = 0;
+			entryArray[2*i+1] = false;
+
+			if(!hasIntersection)
+				hasIntersection = tArray[2*i] != INFINITY || tArray[2*i+1] != INFINITY; 
 
 		}
-	
+		
+		// Return if no intersection
+		if(!hasIntersection)
+			return intersection;
 
 		// Sort intersection by t (distance)
 		// Using Selection Sort, for now
@@ -143,43 +151,66 @@ Intersection intersect(
 
 		}
 
+		/*printf("\n");
+		for(i = 0; i < 2*numShapes; i++)
+		{
+			printf("%x\n", entryArray[i]);
+		}
+*/
 		// Step along ray
 		bool activeArray[NUMSHAPES];
-		activeArray[shapeIndexArray[0]] = entryArray[0] == 1 ? true:false;
+		float densities[NUMSHAPES];
+		float3 diffs[NUMSHAPES];
+		int x;
+		for(x = 0; x < numShapes; x++)
+		{
+			activeArray[x] = true;
+		}
+		
+		//activeArray[shapeIndexArray[0]] = entryArray[0];
 		for(i = 1; i < 2*numShapes; i++)
 		{
 
 			if(tArray[i] == INFINITY)
 				break;
 
-			activeArray[shapeIndexArray[i]] = entryArray[i] == 1 ? true:false;
-		
+			//activeArray[shapeIndexArray[i]] = entryArray[i];			
+
 			float t;
-			for(t = tArray[i-1]; t < tArray[i]; t += 0.05f)
+			for(t = tArray[i-1]; t < tArray[i]; t += 0.1f)
 			{
 				// Calculate density from active list
 				float total_density = 0.f;
 				float3 pos = ray.o + t * ray.d;
-				intersection.N = (float3)(0.f, 0.f, 0.f);
 				for(j = 0; j < numShapes; j++)
 				{			
-					//if(activeArray[j])
-					//{
-						float3 diff = pos - shapeData[j].xyz;
-						float r = length(diff);
-						float density = 1.f/(r*r);
-						total_density += density;
-						intersection.N += density * normalize(diff);
-					//}
+					if(activeArray[j])
+					{
+						diffs[j] = pos - shapeData[j].xyz;
+						float r = length(diffs[j]);
+						densities[j] = 1.f/(r*r);
+						total_density += densities[j];
+					}
 				}
 
-				intersection.N.x /= total_density;
-				intersection.N.y /= total_density;
-				intersection.N.z /= total_density;
-
+				
 				if(total_density >= CORERADIUS)
-				{ 
-					
+				{
+					/*printf("\n");
+					for(x = 0; x < numShapes; x++)
+					{
+						printf("%x\n", activeArray[x]);
+					}	*/
+					intersection.N = (float3)(0.f, 0.f, 0.f);
+					for(j = 0; j < numShapes; j++)
+					{			
+						if(activeArray[j])
+						{
+							intersection.N += densities[j] * normalize(diffs[j]);
+						}
+					}
+					float invDensity = 1.f / total_density;
+					intersection.N *= invDensity;
 					intersection.t = t;
 					i = 2*numShapes;
 					break;
@@ -188,6 +219,12 @@ Intersection intersect(
 		}
 
 	}
+
+	else if(ACCELERATION == 2)
+	{
+
+	}
+
 	else
 	{
 		intersection.shapeIndex = -1;
@@ -196,39 +233,35 @@ Intersection intersect(
 	
 		int i, j;
 	
+		float densities[NUMSHAPES];
+		float3 diffs[NUMSHAPES];
 		float t = 0.f;
 		for ( j = 0; j < 2000; j++)
 		{
 			float total_density = 0.f;
-			intersection.P = ray.o + t*ray.d;
-			intersection.N = (float3)(0.f, 0.f, 0.f);
+			float3 pos = ray.o + t*ray.d;
 
 			for( i = 0; i < numShapes; i++)
 			{
-				/*Sphere sphere;
-				sphere.c = shapeData[i].xyz;
-				sphere.r = 2.f;	*/			
-					
-				float3 diff = intersection.P - shapeData[i].xyz;
-				float r = length(diff);
-				float density = 1.f/(r*r);
-				total_density += density;
-				intersection.N += density * normalize(diff);
-
-				
-				intersection.density = total_density ;
-			
+				diffs[i] = pos - shapeData[i].xyz;
+				float r = length(diffs[i]);
+				densities[i] = 1.f/(r*r);
+				total_density += densities[i];
 			}
-			intersection.N.x /= total_density;
-			intersection.N.y /= total_density;
-			intersection.N.z /= total_density;
+			
 
-			if(total_density > 0.7f)
+			if(total_density > CORERADIUS)
 			{ 
+				intersection.N = (float3)(0.f, 0.f, 0.f);
+				for(i = 0; i < numShapes; i++)
+				{			
+					intersection.N += densities[i] * normalize(diffs[i]);
+				}
+				float invDensity = 1.f / total_density;
+				intersection.N *= invDensity;
+				intersection.t = t;
 				break;
 			}	
-
-			intersection.t = t;
 			t += 0.01f;
 		}
 	}
@@ -320,7 +353,6 @@ __kernel void moveShapes(
 			shapeVector[i].xyz = reflect( (float3)(0.f, 0.f, 1.f), shapeVector[i].xyz);
 		}
 
-		float rate = 0.1f;
-		shapeData[i] += rate * shapeVector[i];		
+		shapeData[i] += RATE * shapeVector[i];		
 	}
 }

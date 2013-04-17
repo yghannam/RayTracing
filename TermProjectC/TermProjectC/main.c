@@ -15,6 +15,8 @@ int width = 400,
 	WindowHandle = 0;
 
 int numShapes = 5;
+int maxDim = 3;
+int acceleration = 0;
 
 unsigned char *pixels;
 GLuint tex; 
@@ -33,6 +35,7 @@ cl_uint work_group_size;
 size_t local_work_size[2];
 size_t global_work_size[2];
 cl_mem pixel_buf;
+cl_event k_events[2];
 
 void Initialize(int, char*[]);
 void InitializeCL(void);
@@ -47,6 +50,8 @@ int main(int argc, char* argv[])
 {
 	printf("How many shapes to display? ");
 	scanf("%d", &numShapes);
+	printf("Acceraltion scheme? [0] [1] [2]: ");
+	scanf("%d", &acceleration);
 
 	Initialize(argc, argv);
 	InitializeCL();
@@ -131,8 +136,8 @@ void InitializeCL()
 
 	CreateProgram();
 
-	char buildOptions[20];
-	sprintf(buildOptions, "-D NUMSHAPES=%d", numShapes);
+	char buildOptions[100];
+	sprintf(buildOptions, "-D NUMSHAPES=%d -D MAXDIM=%d -D ACCELERATION=%d", numShapes, maxDim, acceleration);
 	//printf("%s\n", buildOptions);
 
 	err = clBuildProgram(program, 0, NULL, buildOptions, NULL, NULL);
@@ -254,11 +259,11 @@ void Initialize(int argc, char* argv[])
 {
 	InitWindow(argc, argv);
 	
-	fprintf(
+	/*fprintf(
 		stdout,
 		"\nINFO: OpenGL Version: %s\n",
 		glGetString(GL_VERSION)
-	);
+	);*/
 
 
 	pixels = (unsigned char*)calloc(width*height*4, sizeof(unsigned char));
@@ -291,6 +296,7 @@ void InitWindow(int argc, char* argv[])
 	if(error != GLEW_OK)
 		printf("GLEW not initialized with Error %s\n", glewGetErrorString(error));
 
+
 	glClearColor(0.0, 0.0, 0.0, 1.0);
     glDisable(GL_DEPTH_TEST);
 
@@ -320,12 +326,12 @@ void RenderFunction(void)
 	err = clEnqueueAcquireGLObjects(cQ, 1, &pixel_buf, 0, NULL, NULL);
 	CheckError(err, "Acquire GL Objects");
 	
-	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+	err = clEnqueueNDRangeKernel(cQ, colorKernel, 2, NULL, global_work_size, local_work_size, 0, NULL, &k_events[0]);
 	CheckError(err, "Enqueue Color Kernel");
 
-	clFinish(cQ);
+	//clFinish(cQ);
 
-	err = clEnqueueNDRangeKernel(cQ, moveKernel, 1, NULL, global_work_size, local_work_size, 0, NULL, NULL);
+	err = clEnqueueNDRangeKernel(cQ, moveKernel, 1, NULL, global_work_size, local_work_size, 1, k_events, NULL);
 	CheckError(err, "Enqueue Move Kernel");
 
 	clFinish(cQ);

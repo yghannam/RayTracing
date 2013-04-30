@@ -122,7 +122,7 @@ void InitializeCL()
 	CheckError(err, "GetDeviceInfo");*/
 	//printf("Device Image Support %d\n", image_support);
 
-	cl_context_properties properties[7] = {
+	cl_context_properties properties[] = {
 		CL_GL_CONTEXT_KHR, (cl_context_properties) wglGetCurrentContext(),
 		CL_WGL_HDC_KHR, (cl_context_properties) wglGetCurrentDC(),
 		CL_CONTEXT_PLATFORM, (cl_context_properties) platform_id[0],

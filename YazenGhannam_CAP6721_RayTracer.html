@@ -1,0 +1,970 @@
+<!--
+Author: Yazen Ghannam
+Spring 2013
+CAP 6721
+Assignment 1
+-->
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+		<meta content="utf-8" http-equiv="encoding">
+		<script id="openclProgram" type="text/x-opencl">
+			typedef struct {
+				float3 d, o;
+			}Ray;
+			
+			typedef struct{
+				float3 c;
+				float r;
+			}Sphere;
+			
+			typedef struct{
+				float t;
+				int shapeIndex;
+				float3 P;
+				float3 N;
+			}Intersection;
+			
+			
+			float rayPlane(
+				Ray ray, 
+				float3 normal,
+				float3 point){
+					float t = INFINITY;					
+					float rayNormal = dot(ray.d, normal);
+					if( rayNormal != 0){
+						t = dot(point-ray.o, normal)/rayNormal;
+					}					
+					return (t>0) ? t : INFINITY;
+				}
+				
+			float3 rayTriangle(
+				Ray ray, 
+				float3 p0,
+				float3 p1,
+				float3 p2){
+				float t = INFINITY;
+				
+				/*
+				float3 normal = cross(p1-p0, p2-p0);
+				t = rayPlane(rayOrigin, rayDirection, normal, p0);
+				if(t > 0){
+					float3 p = rayOrigin + t*rayDirection;
+					float normalSquared = dot(normal, normal);
+					float alpha = dot(normal, cross(p-p0, p2-p0))/normalSquared;
+					float beta = dot(normal, cross(p1-p0, p-p0))/normalSquared;
+					
+					if(alpha < 0 || beta < 0 || alpha+beta > 1){
+						t = 0;
+					}
+				}
+				*/
+				float3 e1 = p1-p0;
+				float3 e2 = p2-p0;
+				float3 s = ray.o-p0;
+				float invDet = 1.0f / dot(cross(ray.d, e2), e1);
+				t = invDet * dot(cross(s, e1), e2);
+				float alpha = invDet * dot(cross(ray.d, e2), s);
+				float beta = invDet * dot(cross(s, e1), ray.d);
+				
+				if(t < 0 || alpha < 0 || beta < 0 || alpha+beta > 1){
+					t = INFINITY;
+				}
+				
+				return (float3)(t, alpha, beta);
+			}
+			float raySphere(
+				Ray ray, 
+				Sphere sphere){
+				float t = INFINITY;
+				float a = dot(ray.d, ray.d);
+				float b = 2.0f * dot(ray.o - sphere.c ,ray.d);
+				float c = dot(ray.o-sphere.c,ray.o-sphere.c) - sphere.r*sphere.r;
+				float discriminant = b*b - 4.0f*a*c;
+				if (discriminant == 0){
+					t = -b/(2.0f*a);
+				}
+				else{
+					float root = sqrt(discriminant);
+					float q = (b < 0) ? (-0.5f*(b-root)) : (-0.5f*(b+root));
+					float x1 = q/a;
+					float x2 = c/q;
+					if(x1 > 0 && x2 > 0){
+						t = (x1 < x2) ? x1:x2;
+					}
+					else if (x1 > 0 && x2 <= 0){
+						t = x1;
+					}
+					else if (x1 <= 0 && x2 > 0){
+						t = x2;
+					}
+					else{
+						t = INFINITY;
+					}
+				}
+				return t;
+			}
+			
+			float3 reflect(float3 normal, float3 incident){
+			
+				return normalize( 2 * normal * clamp(dot(normalize(incident), normal), 0.0f, 1.f) - incident);
+			
+			}
+			
+			float boundingBoxIntersect(Ray ray, float3 boundMin, float3 boundMax){
+				float temp = 1.f / ray.d.x;
+				float txmin = (boundMin.x - ray.o.x) * temp;
+				float txmax = (boundMax.x - ray.o.x) * temp;
+				if( txmin > txmax){
+					temp = txmin;
+					txmin = txmax;
+					txmax = temp;
+				}
+					
+				temp = 1.f / ray.d.y;
+				float tymin = (boundMin.y - ray.o.y) * temp;
+				float tymax = (boundMax.y - ray.o.y) * temp;
+				if( tymin > tymax){
+					temp = tymin;
+					tymin = tymax;
+					tymax = temp;
+				}
+					
+				temp = 1.f / ray.d.z;
+				float tzmin = (boundMin.z - ray.o.z) * temp;
+				float tzmax = (boundMax.z - ray.o.z) * temp;
+				if( tzmin > tzmax){
+					temp = tzmin;
+					tzmin = tzmax;
+					tzmax = temp;
+				}
+					
+				float tmin = max(txmin, max(tymin, tzmin));
+				float tmax = min(txmax, max(tymax, tzmax));
+					
+				return (tmin < tmax) ? tmin : -1;
+			}
+			
+			float3 transformRayDirection(float3 localDirection, float3 U, float3 V, float3 W){
+				float3 world;
+
+				world.x = U.x*localDirection.x + V.x*localDirection.y + W.x*localDirection.z;
+				world.y = U.y*localDirection.x + V.y*localDirection.y + W.y*localDirection.z;
+				world.z = U.z*localDirection.x + V.z*localDirection.y + W.z*localDirection.z;
+				return world;
+			}
+			
+			Intersection intersect(
+				Ray ray, 
+				bool isShadowRay, 
+				int shapeType, 
+				int numShapes, 
+				__global float4 *shapeData, 
+				__global float4 *shapeNormals,
+				__global uint4 *shapeIndices){
+				
+				Intersection intersection;
+				intersection.t = INFINITY;				
+				intersection.shapeIndex = -1;
+				
+				unsigned int i = 0;
+				if(shapeType == 1){
+					for( i = 0; i < numShapes; i++){
+						Sphere sphere;
+						sphere.c = shapeData[i].xyz;
+						sphere.r = shapeData[i].w;
+						float rv = raySphere(ray, sphere);
+						if ( rv < intersection.t ){
+							intersection.t = rv;
+							intersection.shapeIndex = i;
+							
+							if(isShadowRay){
+								break;
+							}
+						}
+					}
+					intersection.P = ray.o + intersection.t*ray.d;
+					intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].xyz);
+				}
+				else if(shapeType == 2){
+					float alpha, beta;
+					for( i = 0; i < numShapes; i++){
+						float3 p0 = shapeData[shapeIndices[i].x].xyz;
+						float3 p1 = shapeData[shapeIndices[i].y].xyz;
+						float3 p2 = shapeData[shapeIndices[i].z].xyz;
+						float3 rv = rayTriangle(ray, p0, p1, p2);
+						if ( rv.x < intersection.t ){
+							intersection.t = rv.x;
+							alpha = rv.y;
+							beta = rv.z;
+							intersection.shapeIndex = i;
+							
+							if(isShadowRay){
+								break;
+							}
+						}
+					}
+					intersection.P = ray.o + intersection.t*ray.d;
+					float3 n0 = shapeNormals[shapeIndices[intersection.shapeIndex].x].xyz;
+					float3 n1 = shapeNormals[shapeIndices[intersection.shapeIndex].y].xyz;
+					float3 n2 = shapeNormals[shapeIndices[intersection.shapeIndex].z].xyz;
+					intersection.N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+				}				
+				return intersection;
+			}
+			
+			Intersection intersectGrid(
+				Ray ray, 
+				bool isShadowRay, 
+				int shapeType, 
+				int voxelIndex,
+				__global int *gridMetadata,
+				__global int *gridVoxels,
+				__global float4 *shapeData, 
+				__global float4 *shapeNormals,
+				__global uint4 *shapeIndices){
+				
+				Intersection intersection;
+				intersection.t = INFINITY;				
+				intersection.shapeIndex = -1;
+				
+				int numShapes = gridMetadata[voxelIndex*2];
+				int offset = gridMetadata[voxelIndex*2 + 1];
+				
+				if(numShapes > 0){
+				
+					unsigned int i = 0;
+					if(shapeType == 1){
+						for( i = 0; i < numShapes; i++){
+							Sphere sphere;
+							sphere.c = shapeData[gridVoxels[offset+i]].xyz;
+							sphere.r = shapeData[gridVoxels[offset+i]].w;
+							float rv = raySphere(ray, sphere);
+							if ( rv < intersection.t ){
+								intersection.t = rv;
+								intersection.shapeIndex = gridVoxels[offset+i];
+								
+								if(isShadowRay){
+									break;
+								}
+							}
+						}
+						intersection.P = ray.o + intersection.t*ray.d;
+						intersection.N = normalize(intersection.P - shapeData[intersection.shapeIndex].xyz);
+					}
+					else if(shapeType == 2){
+						float alpha, beta;
+						for( i = 0; i < numShapes; i++){
+							float3 p0 = shapeData[shapeIndices[gridVoxels[offset+i]].x].xyz;
+							float3 p1 = shapeData[shapeIndices[gridVoxels[offset+i]].y].xyz;
+							float3 p2 = shapeData[shapeIndices[gridVoxels[offset+i]].z].xyz;
+							float3 rv = rayTriangle(ray, p0, p1, p2);
+							if ( rv.x < intersection.t ){
+								intersection.t = rv.x;
+								alpha = rv.y;
+								beta = rv.z;
+								intersection.shapeIndex = gridVoxels[offset+i];
+								
+								if(isShadowRay){
+									break;
+								}
+							}
+						}
+						intersection.P = ray.o + intersection.t*ray.d;
+						float3 n0 = shapeNormals[shapeIndices[intersection.shapeIndex].x].xyz;
+						float3 n1 = shapeNormals[shapeIndices[intersection.shapeIndex].y].xyz;
+						float3 n2 = shapeNormals[shapeIndices[intersection.shapeIndex].z].xyz;
+						intersection.N = normalize( (1-alpha-beta)*n0 + alpha*n1 + beta*n2);
+					}	
+				}
+				return intersection;
+			}
+			
+			int3 gridIndex(float3 point, float3 boundMin, float3 boundSize, int3 gridRes){
+				return (int3)(	(int)clamp( round((point.x-boundMin.x)/boundSize.x), 0.f, (float)(gridRes.x-1)),
+								(int)clamp( round((point.y-boundMin.y)/boundSize.y), 0.f, (float)(gridRes.y-1)),
+								(int)clamp( round((point.z-boundMin.z)/boundSize.z), 0.f, (float)(gridRes.z-1)));			
+			}
+			
+			__kernel void getPixelColor(
+				const int shapeType,
+				const int numShapes,
+				__global float4 *viewData,
+				__global float4 *shapeData,
+				__global float4 *shapeNormals,
+				__global uint4 *shapeIndices,
+				__global int *gridMetadata,
+				__global int *gridVoxels,
+				__global uchar4 *raster,
+				__global float4 *debug){
+					const int col = get_global_id(0);
+					const int row = get_global_id(1);
+					
+					const int columns = (int) viewData[0].x;
+					const int rows = (int) viewData[0].y;
+					const float width = viewData[0].z;
+					const float height = viewData[0].w;
+					
+					float3 boundMin = viewData[1].xyz;
+					float3 boundMax = viewData[2].xyz;
+					
+					int3 gridRes = (int3)((int)viewData[3].x, (int)viewData[3].y, (int)viewData[3].z);
+					
+					float4 flags = viewData[4];
+					
+					float3 eye = viewData[5].xyz;
+					float3 U = viewData[6].xyz;
+					float3 V = viewData[7].xyz;					
+					float3 W = viewData[8].xyz;
+					
+					int numIter = 0;
+					int3 gridI = (int3)(0,0,0);
+
+					
+					//float enableDiffuse = viewData[7].x;
+					//float enableSpecular = viewData[7].x;
+					//float enableShadows = viewData[7].x;
+					//float enableInterreflection = viewData[7].x;
+					bool accelerated = (flags.x == 1.0f);
+					
+					float3 localDirection;
+					localDirection.x = width * ( (col+0.5f)/columns - 0.5f);
+					localDirection.y = height * (0.5f - (row+0.5f)/rows);
+					localDirection.z = -1.f;					
+					
+					Ray worldRay;
+					worldRay.o = eye;
+					worldRay.d = transformRayDirection(localDirection, U, V, W);
+					
+					for(int i = 0; i < 4; i++)
+						debug[i] = (float4)(0,0,0,0);
+					debug[0] = flags;
+					
+					uchar4 color = (uchar4)(0, 0, 0, 255);
+					
+					float tmin = boundingBoxIntersect(worldRay, boundMin, boundMax);
+					if( tmin > 0){
+					
+						Intersection intersection;
+						
+						float3 L = (float3)(1.f,1.f,0.f);
+						
+						float4 lightIntensity = (float4)(1.f, 1.f, 1.f, 1.f);
+						float4 kd = (float4)(0.6f, 0.6f, 0.6f, 1.f);
+						float4 ks = (float4)(0.4f,0.4f,0.4f,1.f);
+						float4 ka = (float4)(0.1f, 0.1f, 0.1f, 1.f);
+						float shininess = 10;
+						
+						float epsilon = pow(10.f, -2.f);
+						
+						
+						if(accelerated){					
+							
+							float3 boundSize = boundMax-boundMin;
+							
+							int di = (worldRay.d.x >= 0) ? 1 : -1;
+							int xOutOfRange = (worldRay.d.x >= 0) ? gridRes.x : -1;
+							float dTx = (boundSize.x) / fabs(worldRay.d.x);
+							
+							int dj = (worldRay.d.y >= 0) ? 1 : -1;
+							int yOutOfRange = (worldRay.d.y >= 0) ? gridRes.y : -1;
+							float dTy = (boundSize.y) / fabs(worldRay.d.y);
+							
+							int dk = (worldRay.d.z >= 0) ? 1 : -1;
+							int zOutOfRange = (worldRay.d.z >= 0) ? gridRes.z : -1;
+							float dTz = (boundSize.z) / fabs(worldRay.d.z);
+							
+							
+							bool intersected = false;
+							float tCurrent = tmin;//max(0.f, tmin);
+							float3 gridPoint = worldRay.o + tCurrent * worldRay.d;
+							int3 gridCoord = gridIndex(gridPoint, boundMin, boundSize, gridRes);							
+							float dX = (boundSize.x) / gridRes.x;
+							float txNext = (di == 1) ? 
+								tCurrent+((boundMin.x + (gridCoord.x+di) * dX - gridPoint.x) / worldRay.d.x) :
+								tCurrent+((boundMin.x + (gridCoord.x) * dX - gridPoint.x) / worldRay.d.x);
+							float dY = (boundSize.y) / gridRes.y;
+							float tyNext = (dj == 1) ?
+								tCurrent+((boundMin.y + (gridCoord.y+dj) * dY - gridPoint.y) / worldRay.d.y) :
+								tCurrent+((boundMin.y + (gridCoord.y) * dY - gridPoint.y) / worldRay.d.y);
+							float dZ = (boundSize.z) / gridRes.z;
+							float tzNext = (dk == 1) ?
+								tCurrent+((boundMin.z + (gridCoord.z+dk) * dZ - gridPoint.z) / worldRay.d.z) :
+								tCurrent+((boundMin.z + (gridCoord.z) * dZ - gridPoint.z) / worldRay.d.z);
+							const int cmpToAxis[8] = { 2, 1, 2, 1, 2, 2, 0, 0};
+							
+							while(!intersected){
+								
+								if( gridCoord.x == xOutOfRange || gridCoord.y == yOutOfRange || gridCoord.z == zOutOfRange)
+									break;
+								
+								numIter++;
+								int voxelIndex = gridCoord.z + ( gridCoord.y + gridCoord.x*gridRes.y) * gridRes.z;
+								
+								intersection 
+									= intersectGrid(worldRay, false, shapeType, voxelIndex, gridMetadata, gridVoxels, shapeData, shapeNormals, shapeIndices);
+								
+								intersected = (intersection.t < INFINITY);
+								
+								if(!intersected){
+									int bits =  ((txNext < tyNext) << 2) +
+												((txNext < tzNext) << 1) +
+												((tyNext < tzNext));
+									int stepAxis = cmpToAxis[bits];
+									if(stepAxis == 0){
+										gridCoord.x += di;
+										txNext += dTx;
+									}
+									else if(stepAxis == 1){
+										gridCoord.y += dj;
+										tyNext += dTy;
+									}
+									else{
+										gridCoord.z += dk;
+										tzNext += dTz;
+									}								
+								}								
+							}
+							
+							gridI = gridCoord;
+							
+						}
+						else{						
+							intersection 
+								= intersect(worldRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);								
+						}
+						if (intersection.t < INFINITY){
+							/*
+							Ray shadowRay;
+							shadowRay.o = intersection.P + epsilon;
+							shadowRay.d = L;
+							Intersection shadowIntersection 
+								= intersect(shadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+							Ray reflectedRay;
+							reflectedRay.o = intersection.P + epsilon;
+							reflectedRay.d = reflect(intersection.N, -intersection.P);
+							Intersection reflectedIntersection 
+								= intersect(reflectedRay, false, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+							
+							float4 diffuse 
+								= (shadowIntersection.t < INFINITY) ?  
+									(float4)(0,0,0,0) : (kd * clamp(dot(intersection.N, normalize(L)), 0.0f, 1.f));
+							if(reflectedIntersection.t < INFINITY){
+								Ray reflectedShadowRay;
+								reflectedShadowRay.o = reflectedIntersection.P + epsilon;
+								reflectedShadowRay.d = L;
+								Intersection reflectedShadowIntersection 
+									= intersect(reflectedShadowRay, true, shapeType, numShapes, shapeData, shapeNormals, shapeIndices);
+								if(reflectedShadowIntersection.t < INFINITY){
+									float4 reflectedDiffuse = kd * clamp(dot(reflectedIntersection.N, normalize(L)), 0.0f, 1.f);
+									diffuse = (1.f - ks) * diffuse + ks * reflectedDiffuse;
+								}
+							}	
+							*/
+								float4 diffuse = (kd * clamp(dot(intersection.N, normalize(L)), 0.0f, 1.f));
+								//float3 View = normalize( -worldRay.d);
+								//float3 R = reflect(intersection.N, L);								
+								float4 specular = 0;//ks * pow(clamp(dot(View, R), 0.0f, 1.f), shininess);
+								//TODO: Ambient Lighting
+								float4 ambient = 0;//ka * lightIntensity;
+								float4 Intensity = lightIntensity * (diffuse + specular + ambient);
+										
+								uchar red = (uchar) round(255*Intensity.x);
+								uchar green = (uchar) round(255*Intensity.y);
+								uchar blue = (uchar) round(255*Intensity.z);
+								color = (uchar4)(red, green, blue, 255);
+							}
+						}
+					gridI *= 255/4;
+					raster[row * columns + col] = (uchar4)(numIter*255/4 , color.y, color.z, 255);//((uchar)gridI.x, (uchar)gridI.y, (uchar)gridI.z, 255);
+				}
+		</script>
+		<script type="text/javascript">
+			var model = null;
+			var platforms = null;
+			var devices = [];
+			var canvas = null;
+			var canvasCtx = null;
+			var raster = null;
+			var rv = null;
+			var device = null;
+			var clCtx = null;
+			var clCQ = null;
+			var clProgram = null;
+			var clKernels = new Object();
+			var clBuffers = new Object();
+			var shapeType = 0;
+			var numShapes = 0;
+			var boundingVolume;
+			var viewDimensions = null;
+			var flags = [0, 0, 0, 0];
+			var camera = new Object();
+			var rotate = false;
+			var sceneLoaded = false;
+			var acceleration = 1.0;
+			var localWS = null;
+			var globalWS = null;
+			
+			function parseJSON(jsonFile){
+				var xhttp = new XMLHttpRequest();
+				xhttp.open("GET", jsonFile, false);				
+				xhttp.overrideMimeType("application/json");
+				xhttp.send(null);
+				//console.log(jsonFile);
+				//console.log(xhttp);
+				return JSON.parse(xhttp.responseText);
+			}
+			
+			function loadFile(){
+				model = parseJSON(document.getElementById("inputFile").value);
+				//console.log(model);
+				loadScene();
+			}
+			
+			function padArray(array, currentSize){
+				var paddedArray = new Array();
+				var j = 0;
+				for(var i = 0; i < array.length; i++, j++){
+					if(i > 0 && i % currentSize == 0){
+						paddedArray[j++] = 0;
+						//paddedArray[++j] = array[i];
+					}
+					paddedArray[j] = array[i];
+				}
+				paddedArray[j] = 0;
+				return paddedArray;
+			}
+			
+			function vecLength(array){
+				var total = 0;
+				for(x in array){
+					total += array[x]*array[x];
+				}
+				return Math.sqrt(total);
+			}
+			
+			function normalize(array){
+				var length = vecLength(array);
+				for(x in array){
+					array[x] /= length;
+				}
+				return array;
+			}
+			
+			function cross(a, b){
+				if(a.length != b.length || a.length != 3)
+					throw "cross: vectors must be length 3.";
+				var c = new Array();
+				c[0] = a[1]*b[2] - a[2]*b[1];
+				c[1] = -(a[0]*b[2] - a[2]*b[0]);
+				c[2] = a[0]*b[1] - a[1]*b[0];
+				
+				return c;
+			}
+			
+			function addVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]+b[x];
+				}
+				
+				return c;
+			}
+			
+			function subtractVec(a, b){
+				if(a.length != b.length)
+					throw "subtractVec: vectors must be same length.";
+				
+				var c = new Array();
+				for (x in a){
+					c[x] = a[x]-b[x];
+				}				
+				return c;
+			}
+			
+			function divideVec(a, num){				
+				for (x in a){
+					a[x] /= num;
+				}				
+				return a;
+			}
+			
+			function updateRotate(){
+				rotate = !rotate;
+			}
+			
+			function updateAcceleration(){
+				acceleration = document.getElementById("acceleration").checked ? 1.0 : 0.0;
+				flags = [acceleration, 0, 0, 0];
+			}
+			
+			function updateCamera(){
+				camera.phi += Math.PI/90;
+				//camera.theta += Math.PI/360;
+				camera.eye[0] = camera.radius * Math.sin(camera.theta) * Math.cos(camera.phi);
+				camera.eye[1] = camera.radius * Math.cos(camera.theta);
+				camera.eye[2] = camera.radius * Math.sin(camera.theta) * Math.sin(camera.phi);//[boundingVolume.center[0], boundingVolume.center[1], boundingVolume.center[2]+boundingVolume.diagonal];
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var viewData = viewDimensions.concat(flags, cameraData);
+			
+				//console.log(cameraData);
+			
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
+				clCQ.finish();
+				var endTime = new Date().getTime();
+				console.log("Compute time: "+(endTime-startTime));	
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+			}
+			
+			function createBoundingVolume(){
+				boundingVolume = new Object();
+				
+				var xmin = Number.MAX_VALUE;
+				var ymin = Number.MAX_VALUE;
+				var zmin = Number.MAX_VALUE;
+					
+				var xmax = Number.MIN_VALUE;
+				var ymax = Number.MIN_VALUE;
+				var zmax = Number.MIN_VALUE;
+				
+				if(shapeType == 1){
+				
+					var centers = model.spheres[0].centers;
+					var radii = model.spheres[0].radii;
+					for ( var i = 0; i < centers.length; i+=3){
+						xmin = Math.min(xmin, centers[i]-radii[i/3]);
+						ymin = Math.min(ymin, centers[i+1]-radii[i/3]);
+						zmin = Math.min(zmin, centers[i+2]-radii[i/3]);
+						
+						xmax = Math.max(xmax, centers[i]+radii[i/3]);
+						ymax = Math.max(ymax, centers[i+1]+radii[i/3]);
+						zmax = Math.max(zmax, centers[i+2]+radii[i/3]);
+					}
+					boundingVolume.min = [xmin, ymin, zmin];
+					boundingVolume.max = [xmax, ymax, zmax];
+					boundingVolume.center = divideVec(addVec(boundingVolume.max, boundingVolume.min), 2);
+					boundingVolume.diagonal = vecLength(subtractVec(boundingVolume.max, boundingVolume.min));
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					for( var i = 0; i < vertices.length; i+=3){
+						xmin = Math.min(xmin, vertices[i]);
+						ymin = Math.min(ymin, vertices[i+1]);
+						zmin = Math.min(zmin, vertices[i+2]);
+						
+						xmax = Math.max(xmax, vertices[i]);
+						ymax = Math.max(ymax, vertices[i+1]);
+						zmax = Math.max(zmax, vertices[i+2]);
+					}
+					boundingVolume.min = [xmin, ymin, zmin];
+					boundingVolume.max = [xmax, ymax, zmax];
+					boundingVolume.center = divideVec(addVec(boundingVolume.max, boundingVolume.min), 2);
+					boundingVolume.diagonal = vecLength(subtractVec(boundingVolume.max, boundingVolume.min));
+				}
+				
+				boundingVolume.xSize = boundingVolume.max[0]-boundingVolume.min[0];
+				boundingVolume.ySize = boundingVolume.max[1]-boundingVolume.min[1];
+				boundingVolume.zSize = boundingVolume.max[2]-boundingVolume.min[2];
+			}
+			
+			function offset(x, y, z){
+				return z + (y + x*boundingVolume.grid.yResolution)*boundingVolume.grid.zResolution;
+			}
+			
+			function createGrid(){
+				boundingVolume.grid = new Object();
+				var maxResolution = 64;
+				var a = 3 * Math.max(boundingVolume.xSize, boundingVolume.ySize, boundingVolume.zSize) / Math.pow(numShapes, 1.0/3.0);
+				boundingVolume.grid.xResolution = Math.round(boundingVolume.xSize/a);
+				boundingVolume.grid.xResolution = (boundingVolume.grid.xResolution < 1) ? 1 : 
+													( (boundingVolume.grid.xResolution > maxResolution) ? 64 : boundingVolume.grid.xResolution);
+				//boundingVolume.grid.xResolution = 1;
+				boundingVolume.grid.yResolution = Math.round(boundingVolume.ySize/a);
+				boundingVolume.grid.yResolution = (boundingVolume.grid.yResolution < 1) ? 1 : 
+													( (boundingVolume.grid.yResolution > maxResolution) ? 64 : boundingVolume.grid.yResolution);
+				//boundingVolume.grid.yResolution = 1;
+				boundingVolume.grid.zResolution = Math.round(boundingVolume.zSize/a);
+				boundingVolume.grid.zResolution = (boundingVolume.grid.zResolution < 1) ? 1 : 
+													( (boundingVolume.grid.zResolution > maxResolution) ? 64 : boundingVolume.grid.zResolution);
+				//boundingVolume.grid.zResolution = 1;
+				console.log("Resolutions: ",boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution);
+				boundingVolume.grid.metadata = new Array();
+				boundingVolume.grid.voxels = new Array();
+				boundingVolume.grid.numVoxels = boundingVolume.grid.xResolution * boundingVolume.grid.yResolution * boundingVolume.grid.zResolution;
+				for (var i = 0; i < boundingVolume.grid.numVoxels; i++){
+					boundingVolume.grid.metadata[i] = [0,0];
+					boundingVolume.grid.voxels[i] = new Array();
+				}
+				
+				if(shapeType == 1){
+				
+					var centers = model.spheres[0].centers;
+					var radii = model.spheres[0].radii;
+					for ( var i = 0; i < centers.length; i+=3){
+						var xmin = centers[i]-radii[i/3];
+						var ymin = centers[i+1]-radii[i/3];
+						var zmin = centers[i+2]-radii[i/3];
+						
+						var xmax = centers[i]+radii[i/3];
+						var ymax = centers[i+1]+radii[i/3];
+						var zmax = centers[i+2]+radii[i/3];
+						
+						var gridMin = gridIndex([xmin, ymin, zmin]);
+						var gridMax = gridIndex([xmax, ymax, zmax]);
+						for(var x = gridMin[0]; x <= gridMax[0]; x++)
+							for(var y = gridMin[1]; y <= gridMax[1]; y++)
+								for(var z = gridMin[2]; z <= gridMax[2]; z++)
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+						
+					}
+				}
+				else if(shapeType == 2){					
+					
+					var vertices = model.meshes[0].vertexPositions;
+					var indices = model.meshes[0].indices;
+					for( var i = 0; i < indices.length; i+=3){
+						var one = indices[i]*3;
+						var two = indices[i+1]*3;
+						var three = indices[i+2]*3;
+						
+						var xmin = Math.min(vertices[one], vertices[two], vertices[three]);
+						var ymin = Math.min(vertices[one+1], vertices[two+1], vertices[three+1]);
+						var zmin = Math.min(vertices[one+2], vertices[two+2], vertices[three+2]);
+						
+						var xmax = Math.max(vertices[one], vertices[two], vertices[three]);
+						var ymax = Math.max(vertices[one+1], vertices[two+1], vertices[three+1]);
+						var zmax = Math.max(vertices[one+2], vertices[two+2], vertices[three+2]);
+						
+						var gridMin = gridIndex([xmin, ymin, zmin]);
+						var gridMax = gridIndex([xmax, ymax, zmax]);
+						for(var x = gridMin[0]; x <= gridMax[0]; x++)
+							for(var y = gridMin[1]; y <= gridMax[1]; y++)
+								for(var z = gridMin[2]; z <= gridMax[2]; z++)
+									boundingVolume.grid.voxels[offset(x, y, z)].push(i/3);
+					}
+				}
+				
+				boundingVolume.grid.metadataFlat = []
+				boundingVolume.grid.voxelsFlat = [];
+				var voxelOffset = 0;
+				for (var i = 0; i < boundingVolume.grid.numVoxels; i++){
+					var voxelLength = (boundingVolume.grid.voxels[i].length) ? boundingVolume.grid.voxels[i].length : 0;
+					boundingVolume.grid.metadata[i] = [voxelLength, voxelOffset];
+					voxelOffset += voxelLength;
+					
+					boundingVolume.grid.metadataFlat = boundingVolume.grid.metadataFlat.concat(boundingVolume.grid.metadata[i]);
+					boundingVolume.grid.voxelsFlat = boundingVolume.grid.voxelsFlat.concat(boundingVolume.grid.voxels[i]);
+				}
+				//console.log(boundingVolume);
+			}
+			
+			function gridIndex(point){
+				var x = Math.round((point[0]-boundingVolume.min[0])/boundingVolume.xSize);
+				x = (x < 0) ? 0 : ( (x > boundingVolume.grid.xResolution - 1) ? boundingVolume.grid.xResolution-1 : x);
+				
+				var y = Math.round((point[1]-boundingVolume.min[1])/boundingVolume.ySize);
+				y = (y < 0) ? 0 : ( (y > boundingVolume.grid.yResolution - 1) ? boundingVolume.grid.yResolution-1 : y);
+				
+				var z = Math.round((point[2]-boundingVolume.min[2])/boundingVolume.zSize);
+				z = (z < 0) ? 0 : ( (z > boundingVolume.grid.zResolution - 1) ? boundingVolume.grid.zResolution-1 : z);
+				
+				return [x, y, z];
+			}
+			
+			function loadScene(){
+				
+				
+				var shapeData = new Array();
+				var shapeNormals = new Array();
+				var shapeIndices = new Array();
+				if(model.spheres){
+					shapeType = 1;
+					var j = 0, k = 0;
+					for(var i = 0; i < model.spheres[0].centers.length; i++, k++){
+						if(i > 0 && i % 3 == 0){
+							shapeData[k++] = model.spheres[0].radii[j++];
+						}
+						shapeData[k] = model.spheres[0].centers[i];
+					}
+					shapeData[k] = model.spheres[0].radii[j];
+					shapeNormals[0] = 0;
+					shapeIndices[0] = 0;
+					numShapes = shapeData.length/4;
+				}
+				else if(model.meshes){
+					shapeType = 2;
+					shapeData = padArray(model.meshes[0].vertexPositions, 3);
+					shapeNormals = padArray(model.meshes[0].vertexNormals, 3);
+					shapeIndices = padArray(model.meshes[0].indices, 3);
+					numShapes = shapeIndices.length/4;
+				}
+				else{
+					throw "Model error: No shape data";
+				}
+				//console.log(shapeIndices);
+				//var sphereCenters = padArray(model.spheres[0].centers, 3);
+				clBuffers.shapeDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeData.length);
+				clBuffers.shapeNormalsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeNormals.length);
+				clBuffers.shapeIndicesBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*shapeIndices.length);
+				
+				createBoundingVolume();
+				createGrid();
+				//console.log(boundingVolume);
+				
+				var eye = 0;
+				var at = 0;
+				var up = 0;
+				var fov = 0;
+				if( model.cameras ){
+					camera.eye = model.cameras[0].eye;
+					camera.at = model.cameras[0].at;
+					camera.up = model.cameras[0].up;
+					camera.fov = model.cameras[0].fov;
+				}
+				else{
+					camera.eye = [boundingVolume.center[0], boundingVolume.center[1], boundingVolume.center[2]+boundingVolume.diagonal];
+					camera.at = boundingVolume.center;
+					camera.up = [0, 1, 0];
+					camera.fov = 45;
+				}
+				
+				camera.radius = vecLength(subtractVec(camera.eye, camera.at));
+				camera.phi = 0;
+				camera.theta = 90 * Math.PI / 180;
+				
+				var W = normalize( subtractVec(camera.eye, camera.at));
+				var U = normalize( cross(camera.up, W));
+				var V = cross( W, U);				
+				var cameraData = padArray(camera.eye.concat(U, V, W), 3);
+				var aspectRatio = canvas.width/canvas.height;
+				var height = 2 * Math.tan(camera.fov*Math.PI/180/2);
+				var width = aspectRatio * height;
+				flags = [acceleration, 0, 0, 0];
+				viewDimensions = [canvas.width, canvas.height, width, height].concat(
+									boundingVolume.min, [0], 
+									boundingVolume.max, [0], 
+									[boundingVolume.grid.xResolution, boundingVolume.grid.yResolution, boundingVolume.grid.zResolution], [0]);
+				var viewData = viewDimensions.concat(flags, cameraData);
+				console.log(viewDimensions);
+				clBuffers.viewDataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*viewData.length);
+				clBuffers.gridMetadataBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.metadataFlat.length);
+				clBuffers.gridVoxelsBuffer = clCtx.createBuffer(WebCL.CL_MEM_READ_ONLY, 4*boundingVolume.grid.voxelsFlat.length);
+				clBuffers.rasterBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*canvas.width*canvas.height);
+				clBuffers.debugBuffer = clCtx.createBuffer(WebCL.CL_MEM_WRITE_ONLY, 4*shapeData.length);					
+
+				clKernels.colorKernel = clProgram.createKernel("getPixelColor");
+				clKernels.colorKernel.setKernelArg(0, shapeType, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(1, numShapes, WebCL.types.INT);
+				clKernels.colorKernel.setKernelArg(2, clBuffers.viewDataBuffer);
+				clKernels.colorKernel.setKernelArg(3, clBuffers.shapeDataBuffer);
+				clKernels.colorKernel.setKernelArg(4, clBuffers.shapeNormalsBuffer);
+				clKernels.colorKernel.setKernelArg(5, clBuffers.shapeIndicesBuffer);
+				clKernels.colorKernel.setKernelArg(6, clBuffers.gridMetadataBuffer);
+				clKernels.colorKernel.setKernelArg(7, clBuffers.gridVoxelsBuffer);
+				clKernels.colorKernel.setKernelArg(8, clBuffers.rasterBuffer);
+				clKernels.colorKernel.setKernelArg(9, clBuffers.debugBuffer);
+				//console.log(device);
+				wsSize = clKernels.colorKernel.getKernelWorkGroupInfo(device, WebCL.CL_KERNEL_WORK_GROUP_SIZE);
+				xSize = Math.floor(Math.sqrt(wsSize)); 
+				ySize = Math.floor(wsSize/xSize);
+				localWS = [xSize,ySize];
+				globalWS = [
+					Math.ceil (canvas.width / localWS[0]) * localWS[0], 
+					Math.ceil (canvas.height / localWS[1]) * localWS[1]
+				];
+				
+				var startTime = new Date().getTime();
+				clCQ.enqueueWriteBuffer(clBuffers.viewDataBuffer, true, 0, 4*viewData.length, new Float32Array(viewData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeDataBuffer, true, 0, 4*shapeData.length, new Float32Array(shapeData), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeNormalsBuffer, true, 0, 4*shapeNormals.length, new Float32Array(shapeNormals), []);
+				clCQ.enqueueWriteBuffer(clBuffers.shapeIndicesBuffer, true, 0, 4*shapeIndices.length, new Uint32Array(shapeIndices), []);
+				clCQ.enqueueWriteBuffer(clBuffers.gridMetadataBuffer, true, 0, 4*boundingVolume.grid.metadataFlat.length, new Uint32Array(boundingVolume.grid.metadataFlat), []);
+				clCQ.enqueueWriteBuffer(clBuffers.gridVoxelsBuffer, true, 0, 4*boundingVolume.grid.voxelsFlat.length, new Uint32Array(boundingVolume.grid.voxelsFlat), []);
+				clCQ.enqueueNDRangeKernel(clKernels.colorKernel, globalWS.length, [], globalWS, localWS, []);
+				clCQ.finish();
+				console.log("Compute time: "+(new Date().getTime()-startTime));	
+				clCQ.enqueueReadBuffer(clBuffers.rasterBuffer, true, 0, canvas.width*canvas.height*4, raster.data, []);
+				canvasCtx.putImageData(raster, 0, 0);
+				sceneLoaded = true;
+				
+				//var debug = new Float32Array(16);
+				//clCQ.enqueueReadBuffer(clBuffers.debugBuffer, true, 0, 4*16, debug, []);	
+				//console.log(debug);
+					
+			}
+			
+			function main(){
+				document.getElementById("inputFile").value = "";
+				document.getElementById("acceleration").checked = true;
+								
+				try{
+					canvas = document.getElementById("myCanvas");
+					canvasCtx = canvas.getContext("2d");
+					raster = canvasCtx.createImageData(canvas.width, canvas.height);
+					
+					platforms = WebCL.getPlatformIDs();
+					for ( var i in platforms ){
+						devices[i] = platforms[i].getDeviceIDs(WebCL.CL_DEVICE_TYPE_DEFAULT);
+					}
+					//console.log(platforms);
+					//console.log(devices);
+					device = devices[0][0];
+					clCtx = WebCL.createContext([WebCL.CL_CONTEXT_PLATFORM, platforms[0]], devices[0]);
+					clCQ = clCtx.createCommandQueue(devices[0][0], 0);
+					clProgram = clCtx.createProgramWithSource(document.getElementById("openclProgram").text);
+					clProgram.buildProgram(devices[0], "");
+					
+					var requestAnimationFrame = window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame;
+					(function callback(){
+						requestAnimationFrame(callback);
+						if(sceneLoaded && rotate)
+							updateCamera();
+					})();
+					//console.log(clBuffers);
+				}catch(e){
+					console.log(e);
+					console.log(clProgram.getProgramBuildInfo(devices[0][0], WebCL.CL_PROGRAM_BUILD_LOG));
+					return -1;
+				}
+			}
+			
+			function releaseResources(){
+				for ( x in clBuffers){
+					clBuffers[x].releaseCLResources();
+				}
+				for ( x in clKernels){
+					clKernels[x].releaseCLResources();
+				}
+				clCQ.releaseCLResources();
+				clProgram.releaseCLResources();
+				clCtx.releaseCLResources();
+			}
+		</script>
+	</head>
+	<body onload="main();" onunload="releaseResources();">
+		<p>Hello, please select a file. The file must be in the current directory.</p>
+		<input type="file" id="inputFile" size="50" accept="application/json" onchange="loadFile();">
+		<br>
+		<div style="float:left">
+			<canvas id="myCanvas" width="640" height="480"></canvas>
+		</div>
+		<div style="float:left">
+			<p>Camera Controls</p>
+			<input type="button" onclick="updateRotate();" value="Start/Stop Rotation">
+			<input type="checkbox" id="acceleration" onchange="updateAcceleration();">Enable Acceleration
+		</div>
+	</body>
+</html>
+
